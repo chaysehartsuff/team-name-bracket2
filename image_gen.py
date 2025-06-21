@@ -37,6 +37,7 @@ class GeneratedImage:
     def __init__(self, image: Image.Image, base_dir: str):
         self._image = image
         self._base_dir = base_dir
+        self._full_saved_path = None
 
     def save(self, relative_path: str):
         """
@@ -48,11 +49,18 @@ class GeneratedImage:
             gen.create_clash_box("A","B").save("icons/round1_clash0.png")
         """
         full_path = os.path.join(self._base_dir, relative_path)
+        self._full_saved_path = full_path
         folder = os.path.dirname(full_path)
         if folder and not os.path.exists(folder):
             os.makedirs(folder, exist_ok=True)
         self._image.save(full_path)
         return self
+    
+    def get_save_path(self):
+        """
+        Returns the full path of the saved image.
+        """
+        return self._full_saved_path
 
 class ImageGen:
     """
@@ -313,5 +321,9 @@ class ImageGen:
 
         # 3) load & wrap
         img = Image.open(dot_path + ".png")
+        w, h = img.size
+        px = int(w * 0.05)   # 5% horizontally
+        py = int(h * 0.05)   # 5% vertically
+        img = img.crop((px, py, w - px, h - py))
         return GeneratedImage(img, self.output_dir)
 

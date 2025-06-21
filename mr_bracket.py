@@ -150,16 +150,18 @@ class Bracket:
         final_clash = final_round[0]
         return getattr(final_clash, 'winner', None)
 
-    def generate_standings(self, rounds: List[List[BOClash]], guild_id: int) -> None:
+    def generate_standings(self, guild_id: int) -> None:
         """
         Generate match icons and a full bracket diagram under:
           /images/{guild_id}/icons/{{round}}_{{clash_index}}.png
           /images/{guild_id}/bracket/current_standing.png
         Requires rounds > 0. To be implemented.
         """
+        rounds: List[List[BOClash]] = self._bracket.rounds
+
         if self.rounds == 0 or self._gen is None:
             raise RuntimeError("Bracket not started")
 
         img_gen = ImageGen(f"images/guild_{guild_id}")
-        img_gen.create_bracket(rounds, self.rounds).save("bracket/current_standing.png")
+        return img_gen.create_bracket(rounds, self.rounds).save("bracket/current_standing.png").get_save_path()
 
