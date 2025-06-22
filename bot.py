@@ -1,4 +1,4 @@
-import os, sys, re
+import os, sys, re, asyncio
 import discord
 from discord import app_commands, Permissions
 from discord.ext import commands
@@ -197,7 +197,6 @@ async def on_raw_reaction_add(payload):
         return
         
     bot_is_playing = getGuildVar(payload.guild_id, "bot_is_playing", False)
-    print(f"Bot is playing: {bot_is_playing}", flush=True)
     if payload.user_id == bot.user.id and bot_is_playing == False:
         return
         
@@ -245,7 +244,6 @@ async def on_raw_reaction_remove(payload):
 async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
     if reaction.message.guild is None:
         return
-    print(f"Reaction added by {user.name} (ID: {user.id}), is_bot: {user.bot}, emoji: {reaction.emoji}", flush=True)
     guild_id = reaction.message.guild.id
     bracket_channel_name = os.getenv("BRACKET_CHANNEL_NAME")
     if reaction.message.channel.name == bracket_channel_name:
@@ -330,6 +328,9 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                                     original_count = len(submission['votes'])
                                     submission['votes'] = [v for v in submission['votes'] if v != user.id]
                                     removed_count = original_count - len(submission['votes'])
+                                    if removed_count == 0:
+                                        continue
+
                                     user_votes_remaining += removed_count
                                     total_message_votes = len(submission['votes'])
                                     set_user_vote_count(guild_id, user.id, user_votes_remaining)
@@ -470,11 +471,25 @@ async def process_stage(guild_id: int):
                     clear_user_votes(guild_id)
 
                     live_submission_messages = []
-                    # Reformat submissions into prefixed list
-                    for idx, submission in enumerate(round_submissions, 1):  # Start counting from 1
-                        message = await send_channel_message(guild_id, bracket_channel_name, f"(0) {submission["name"]}")
-                        await message.add_reaction("👍")
-                        live_submission_messages.append(message)
+                    # Prepare all message sending tasks
+                    message_tasks = []
+                    for submission in round_submissions:
+                        message_tasks.append(send_channel_message(guild_id, bracket_channel_name, f"(0) {submission['name']}"))
+                    
+                    # Execute all message sending tasks in parallel
+                    messages = await asyncio.gather(*message_tasks)
+                    live_submission_messages.extend(messages)
+                    
+                    # Now add reactions to all messages
+                    reaction_tasks = []
+                    for message in live_submission_messages:
+                        reaction_tasks.append(message.add_reaction("👍"))
+                    
+                    # Wait for all reactions to be added
+                    await asyncio.gather(*reaction_tasks)
+                    
+                    # Store the messages for later reference
+                    setGuildVar(guild_id, f"live_submission_messages", live_submission_messages)
 
                     # Bot can vote too !    
                     bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
@@ -652,14 +667,15 @@ async def process_stage(guild_id: int):
                                 bracket.submit_winner(current_clash.team2, len(team2_votes), len(team1_votes))
                                 message = f"**{current_clash.team2}** is moving on!"
 
+                            current_clash = None
                             if bracket.get_winner() is not None:
                                 message = f"Well it's official! The winner is **{bracket.get_winner()}**!"
+                                current_clash = ClashInfo(0, 0, "", "")
 
                             setGuildVar(guild_id, "view_message", message)
 
                             team1_votes = []
                             team2_votes = []
-                            current_clash = None
                             playoff_mode = "view"
                             setGuildVar(guild_id, "current_clash", current_clash)
                             setGuildVar(guild_id, "team1_votes", team1_votes)
@@ -669,12 +685,8 @@ async def process_stage(guild_id: int):
                         else:
                             setGuildVar(guild_id, "confirm_message", "We need a tiebreaker vote...")
                     else:
-                        # After win celebration
+                        print("POST WINNER CELEBRATION", flush=True)
                         return
-                    # if bracket.get_winner() is not None:
-                    #     # DONE. END EVERYTHING HERE
-                    #     print(f"Game ended! The winner is {bracket.get_winner()}")
-                    #     return
 
                     return
                 return
