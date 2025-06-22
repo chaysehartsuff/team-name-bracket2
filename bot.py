@@ -449,7 +449,8 @@ async def process_stage(guild_id: int):
                 if len(round_submissions) == 0:
                     setGuildVar(guild_id, "requires_confirmation", True)
                     await open_submissions(bot.get_guild(guild_id), bracket_channel_name)
-                    await send_channel_message(guild_id, bracket_channel_name ,f"Submissions are now Open - Round {open_qual_round}/{total_rounds}")
+                    await send_channel_message(guild_id, bracket_channel_name ,f"Submissions Open! {open_qual_round}/{total_rounds}")
+                    await send_channel_message(guild_id, bracket_channel_name, f"We'll accept a total of {max_submissions} names... Go!")
                 elif len(round_submissions) >= max_submissions:
                     # ensure submissions don't exceed max
                     while len(round_submissions) > max_submissions:
@@ -539,7 +540,7 @@ async def process_stage(guild_id: int):
                         for submission in top_submissions:
                             votes = submission["votes"]
                             if votes in vote_counts:
-                                setGuildVar(guild_id, "confirm_message", "Tie detected! Try giving the users more votes.")
+                                setGuildVar(guild_id, "confirm_message", "Tie detected. Try giving the users more votes.")
                                 return
                             vote_counts[votes] = 1
 
@@ -551,6 +552,17 @@ async def process_stage(guild_id: int):
                     setGuildVar(guild_id, "qualified_submissions", qualified_submissions)
                     setGuildVar(guild_id, "open_qual_round", open_qual_round)
                     setGuildVar(guild_id, "open_qual_mode", open_qual_mode)
+
+                    message = ""
+                    for idx, submission in qualified_submissions:
+                        message += f"**{submission["name"]}**"
+                        if idx + 1 < len(qualified_submissions):
+                            message += ", "
+                        else:
+                            message += "and"
+
+                    if len(qualified_submissions) > 0:
+                        await send_channel_message(guild_id, bracket_channel_name, message + " are moving on!")
 
                     # stage cofirmed
                     if len(qualified_submissions) == total_qual_spots:
