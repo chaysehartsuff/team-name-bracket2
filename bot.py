@@ -554,12 +554,12 @@ async def process_stage(guild_id: int):
                     setGuildVar(guild_id, "open_qual_mode", open_qual_mode)
 
                     message = ""
-                    for idx, submission in qualified_submissions:
-                        message += f"**{submission["name"]}**"
-                        if idx + 1 < len(qualified_submissions):
+                    for idx, submission in enumerate(qualified_submissions):
+                        message += f"**{submission['name']}**"
+                        if idx + 1 < len(qualified_submissions) - 1:
                             message += ", "
-                        else:
-                            message += "and"
+                        elif idx + 1 == len(qualified_submissions) - 1:
+                            message += " and "
 
                     if len(qualified_submissions) > 0:
                         await send_channel_message(guild_id, bracket_channel_name, message + " are moving on!")
