@@ -1,6 +1,6 @@
-import os, sys, re
+import os, sys, re, asyncio
 import discord
-from discord import app_commands
+from discord import app_commands, Permissions
 from discord.ext import commands
 import math
 from typing import Optional, List
@@ -24,13 +24,15 @@ bot_removing_reaction = {}
 
 @bot.tree.command(name="start",
                   description="Begin team name bracket")
+@app_commands.default_permissions(administrator=True)
 async def start(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     current = getGuildVar(guild_id, "stage", 0)
     if current == 0:
         setGuildVar(guild_id, "stage", 1)
         if not await validate_start(interaction):
-            return
+            return        
+        await close_submissions(interaction.guild, os.getenv("BRACKET_CHANNEL_NAME"))
         await interaction.response.send_message("Starting bracket...", ephemeral=True)
         await process_stage(guild_id)
     else:
@@ -41,6 +43,7 @@ async def start(interaction: discord.Interaction):
 
 @bot.tree.command(name="reset",
                   description="Reset stages")
+@app_commands.default_permissions(administrator=True)
 async def clear_stage(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     clearGuild(guild_id)
@@ -51,6 +54,7 @@ async def clear_stage(interaction: discord.Interaction):
 
 @bot.tree.command(name="confirm",
                  description="Confirms the pending operation")
+@app_commands.default_permissions(administrator=True)
 async def confirm(interaction: discord.Interaction):
     setGuildVar(interaction.guild_id, "requires_confirmation", False)
     await process_stage(interaction.guild_id)
@@ -62,6 +66,7 @@ async def confirm(interaction: discord.Interaction):
 
 @bot.tree.command(name="give_vote",
                   description="Give votes to users")
+@app_commands.default_permissions(administrator=True)
 async def give_vote(interaction: discord.Interaction, amount: int = 1, user_id: str = None):
     guild_id = interaction.guild.id
     
@@ -192,7 +197,6 @@ async def on_raw_reaction_add(payload):
         return
         
     bot_is_playing = getGuildVar(payload.guild_id, "bot_is_playing", False)
-    print(f"Bot is playing: {bot_is_playing}", flush=True)
     if payload.user_id == bot.user.id and bot_is_playing == False:
         return
         
@@ -240,7 +244,6 @@ async def on_raw_reaction_remove(payload):
 async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
     if reaction.message.guild is None:
         return
-    print(f"Reaction added by {user.name} (ID: {user.id}), is_bot: {user.bot}, emoji: {reaction.emoji}", flush=True)
     guild_id = reaction.message.guild.id
     bracket_channel_name = os.getenv("BRACKET_CHANNEL_NAME")
     if reaction.message.channel.name == bracket_channel_name:
@@ -325,6 +328,9 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                                     original_count = len(submission['votes'])
                                     submission['votes'] = [v for v in submission['votes'] if v != user.id]
                                     removed_count = original_count - len(submission['votes'])
+                                    if removed_count == 0:
+                                        continue
+
                                     user_votes_remaining += removed_count
                                     total_message_votes = len(submission['votes'])
                                     set_user_vote_count(guild_id, user.id, user_votes_remaining)
@@ -446,7 +452,7 @@ async def process_stage(guild_id: int):
             if open_qual_mode == "submissions":
 
                 # New round just started
-                if len(round_submissions) == 0:
+                if len(round_submissions) == 0 and await is_submission_open(bot.get_guild(guild_id), bracket_channel_name) == False:
                     setGuildVar(guild_id, "requires_confirmation", True)
                     await open_submissions(bot.get_guild(guild_id), bracket_channel_name)
                     await send_channel_message(guild_id, bracket_channel_name ,f"Submissions Open! {open_qual_round}/{total_rounds}")
@@ -455,7 +461,7 @@ async def process_stage(guild_id: int):
                     # ensure submissions don't exceed max
                     while len(round_submissions) > max_submissions:
                         round_submissions.pop()
-                    await open_voting(bot.get_guild(guild_id), bracket_channel_name)
+                    await close_submissions(bot.get_guild(guild_id), bracket_channel_name)
                     open_qual_mode = "voting"
                     await send_channel_message(guild_id, bracket_channel_name ,f"Submissions closed...")
                     await send_channel_message(guild_id, bracket_channel_name, f"Each person gets {user_votes_per_round} votes")
@@ -465,11 +471,25 @@ async def process_stage(guild_id: int):
                     clear_user_votes(guild_id)
 
                     live_submission_messages = []
-                    # Reformat submissions into prefixed list
-                    for idx, submission in enumerate(round_submissions, 1):  # Start counting from 1
-                        message = await send_channel_message(guild_id, bracket_channel_name, f"(0) {submission["name"]}")
-                        await message.add_reaction("👍")
-                        live_submission_messages.append(message)
+                    # Prepare all message sending tasks
+                    message_tasks = []
+                    for submission in round_submissions:
+                        message_tasks.append(send_channel_message(guild_id, bracket_channel_name, f"(0) {submission['name']}"))
+                    
+                    # Execute all message sending tasks in parallel
+                    messages = await asyncio.gather(*message_tasks)
+                    live_submission_messages.extend(messages)
+                    
+                    # Now add reactions to all messages
+                    reaction_tasks = []
+                    for message in live_submission_messages:
+                        reaction_tasks.append(message.add_reaction("👍"))
+                    
+                    # Wait for all reactions to be added
+                    await asyncio.gather(*reaction_tasks)
+                    
+                    # Store the messages for later reference
+                    setGuildVar(guild_id, f"live_submission_messages", live_submission_messages)
 
                     # Bot can vote too !    
                     bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
@@ -515,6 +535,8 @@ async def process_stage(guild_id: int):
                 else:
                     # event processing lands here
                     bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
+                    setGuildVar(guild_id, "confirm_message", "Still collecting submissions..." + ("(spam to trigger bot submissions)" if bot_is_playing else ""))
+                    setGuildVar(guild_id, "requires_confirmation", True)
                     if bot_is_playing and getGuildVar(guild_id, "bot_is_playing", False) == False:
                         msg_freq = int(os.getenv("BOT_SUBMISSION_FREQUENCY", 3))
                         amt_msgs_since_last_bot_sub = getGuildVar(guild_id, "amt_msgs_since_last_bot_sub", 0)
@@ -645,14 +667,15 @@ async def process_stage(guild_id: int):
                                 bracket.submit_winner(current_clash.team2, len(team2_votes), len(team1_votes))
                                 message = f"**{current_clash.team2}** is moving on!"
 
+                            current_clash = None
                             if bracket.get_winner() is not None:
                                 message = f"Well it's official! The winner is **{bracket.get_winner()}**!"
+                                current_clash = ClashInfo(0, 0, "", "")
 
                             setGuildVar(guild_id, "view_message", message)
 
                             team1_votes = []
                             team2_votes = []
-                            current_clash = None
                             playoff_mode = "view"
                             setGuildVar(guild_id, "current_clash", current_clash)
                             setGuildVar(guild_id, "team1_votes", team1_votes)
@@ -662,12 +685,8 @@ async def process_stage(guild_id: int):
                         else:
                             setGuildVar(guild_id, "confirm_message", "We need a tiebreaker vote...")
                     else:
-                        # After win celebration
+                        print("POST WINNER CELEBRATION", flush=True)
                         return
-                    # if bracket.get_winner() is not None:
-                    #     # DONE. END EVERYTHING HERE
-                    #     print(f"Game ended! The winner is {bracket.get_winner()}")
-                    #     return
 
                     return
                 return
@@ -690,7 +709,7 @@ async def open_submissions(guild: discord.Guild, channel_name: str):
     await channel.set_permissions(guild.default_role, overwrite=overwrite)
     return None
 
-async def open_voting(guild: discord.Guild, channel_name: str):
+async def close_submissions(guild: discord.Guild, channel_name: str):
     # find the channel by name
     channel = discord.utils.get(guild.text_channels, name=channel_name)
     if channel is None:
@@ -704,6 +723,16 @@ async def open_voting(guild: discord.Guild, channel_name: str):
     # apply the permission overwrite
     await channel.set_permissions(guild.default_role, overwrite=overwrite)
     return None
+
+async def is_submission_open(guild: discord.Guild, channel_name: str):
+    # find the channel by name
+    channel = discord.utils.get(guild.text_channels, name=channel_name)
+    if channel is None:
+        return None
+
+    # compute the current permissions
+    permissions = channel.permissions_for(guild.default_role)
+    return permissions.send_messages
 def validate_submission(interaction):
     # Max 16 characters
     return None
