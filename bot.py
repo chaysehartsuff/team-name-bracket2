@@ -1,6 +1,6 @@
 import os, sys, re
 import discord
-from discord import app_commands
+from discord import app_commands, Permissions
 from discord.ext import commands
 import math
 from typing import Optional, List
@@ -24,13 +24,15 @@ bot_removing_reaction = {}
 
 @bot.tree.command(name="start",
                   description="Begin team name bracket")
+@app_commands.default_permissions(administrator=True)
 async def start(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     current = getGuildVar(guild_id, "stage", 0)
     if current == 0:
         setGuildVar(guild_id, "stage", 1)
         if not await validate_start(interaction):
-            return
+            return        
+        await close_submissions(interaction.guild, os.getenv("BRACKET_CHANNEL_NAME"))
         await interaction.response.send_message("Starting bracket...", ephemeral=True)
         await process_stage(guild_id)
     else:
@@ -41,6 +43,7 @@ async def start(interaction: discord.Interaction):
 
 @bot.tree.command(name="reset",
                   description="Reset stages")
+@app_commands.default_permissions(administrator=True)
 async def clear_stage(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     clearGuild(guild_id)
@@ -51,6 +54,7 @@ async def clear_stage(interaction: discord.Interaction):
 
 @bot.tree.command(name="confirm",
                  description="Confirms the pending operation")
+@app_commands.default_permissions(administrator=True)
 async def confirm(interaction: discord.Interaction):
     setGuildVar(interaction.guild_id, "requires_confirmation", False)
     await process_stage(interaction.guild_id)
@@ -62,6 +66,7 @@ async def confirm(interaction: discord.Interaction):
 
 @bot.tree.command(name="give_vote",
                   description="Give votes to users")
+@app_commands.default_permissions(administrator=True)
 async def give_vote(interaction: discord.Interaction, amount: int = 1, user_id: str = None):
     guild_id = interaction.guild.id
     
@@ -446,7 +451,7 @@ async def process_stage(guild_id: int):
             if open_qual_mode == "submissions":
 
                 # New round just started
-                if len(round_submissions) == 0:
+                if len(round_submissions) == 0 and await is_submission_open(bot.get_guild(guild_id), bracket_channel_name) == False:
                     setGuildVar(guild_id, "requires_confirmation", True)
                     await open_submissions(bot.get_guild(guild_id), bracket_channel_name)
                     await send_channel_message(guild_id, bracket_channel_name ,f"Submissions Open! {open_qual_round}/{total_rounds}")
@@ -455,7 +460,7 @@ async def process_stage(guild_id: int):
                     # ensure submissions don't exceed max
                     while len(round_submissions) > max_submissions:
                         round_submissions.pop()
-                    await open_voting(bot.get_guild(guild_id), bracket_channel_name)
+                    await close_submissions(bot.get_guild(guild_id), bracket_channel_name)
                     open_qual_mode = "voting"
                     await send_channel_message(guild_id, bracket_channel_name ,f"Submissions closed...")
                     await send_channel_message(guild_id, bracket_channel_name, f"Each person gets {user_votes_per_round} votes")
@@ -515,6 +520,8 @@ async def process_stage(guild_id: int):
                 else:
                     # event processing lands here
                     bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
+                    setGuildVar(guild_id, "confirm_message", "Still collecting submissions..." + ("(spam to trigger bot submissions)" if bot_is_playing else ""))
+                    setGuildVar(guild_id, "requires_confirmation", True)
                     if bot_is_playing and getGuildVar(guild_id, "bot_is_playing", False) == False:
                         msg_freq = int(os.getenv("BOT_SUBMISSION_FREQUENCY", 3))
                         amt_msgs_since_last_bot_sub = getGuildVar(guild_id, "amt_msgs_since_last_bot_sub", 0)
@@ -690,7 +697,7 @@ async def open_submissions(guild: discord.Guild, channel_name: str):
     await channel.set_permissions(guild.default_role, overwrite=overwrite)
     return None
 
-async def open_voting(guild: discord.Guild, channel_name: str):
+async def close_submissions(guild: discord.Guild, channel_name: str):
     # find the channel by name
     channel = discord.utils.get(guild.text_channels, name=channel_name)
     if channel is None:
@@ -704,6 +711,16 @@ async def open_voting(guild: discord.Guild, channel_name: str):
     # apply the permission overwrite
     await channel.set_permissions(guild.default_role, overwrite=overwrite)
     return None
+
+async def is_submission_open(guild: discord.Guild, channel_name: str):
+    # find the channel by name
+    channel = discord.utils.get(guild.text_channels, name=channel_name)
+    if channel is None:
+        return None
+
+    # compute the current permissions
+    permissions = channel.permissions_for(guild.default_role)
+    return permissions.send_messages
 def validate_submission(interaction):
     # Max 16 characters
     return None
