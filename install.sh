@@ -27,7 +27,7 @@ check_package() {
       fi
     fi
   elif command -v rpm >/dev/null 2>&1; then
-    # CentOS/RHEL/Fedora
+    # CentOS/RHEL/Fedora/AlmaLinux
     if rpm -q "$pkg_name" >/dev/null 2>&1; then
       if [ -n "$pkg_version" ]; then
         installed_version=$(rpm -q "$pkg_name" --qf '%{VERSION}' | head -1)
@@ -64,7 +64,7 @@ install_package() {
         sudo apt-get install -y "$pkg_name"
       fi
       ;;
-    "centos"|"rhel")
+    "centos"|"rhel"|"almalinux")
       if [ -n "$pkg_version" ]; then
         sudo yum install -y "${pkg_name}-${pkg_version}"
       else
@@ -99,7 +99,7 @@ case $DISTRO in
   "debian"|"ubuntu")
     sudo apt-get update
     ;;
-  "centos"|"rhel")
+  "centos"|"rhel"|"almalinux")
     sudo yum makecache
     ;;
   "fedora")
@@ -124,7 +124,7 @@ for pkg in "${PKG_LIST[@]}"; do
       "debian"|"ubuntu")
         pkg_name="python3"
         ;;
-      "centos"|"rhel"|"fedora")
+      "centos"|"rhel"|"almalinux"|"fedora")
         pkg_name="python3"
         ;;
     esac
