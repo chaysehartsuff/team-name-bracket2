@@ -5,12 +5,13 @@ from discord.ext import commands
 import math
 from typing import Optional, List
 from bracketool.domain import Competitor, Clash
+from ai import get_name_submission
 
 import random
 from typing import List
 
 from mr_bracket import Bracket, ClashInfo
-from guild_state import setGuildVar, getGuildVar
+from guild_state import setGuildVar, getGuildVar, clearGuild
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -38,13 +39,13 @@ async def start(interaction: discord.Interaction):
             ephemeral=True
         )
 
-@bot.tree.command(name="clear_stage",
+@bot.tree.command(name="reset",
                   description="Reset stages")
 async def clear_stage(interaction: discord.Interaction):
     guild_id = interaction.guild.id
-    setGuildVar(guild_id, "stage", None)
+    clearGuild(guild_id)
     await interaction.response.send_message(
-        "✅ Stage cleared.",
+        "✅ Reset Everything.",
         ephemeral=True
     )
 
@@ -59,6 +60,57 @@ async def confirm(interaction: discord.Interaction):
     )
     setGuildVar(interaction.guild_id, "confirm_message", None)
 
+@bot.tree.command(name="give_vote",
+                  description="Give votes to users")
+async def give_vote(interaction: discord.Interaction, amount: int = 1, user_id: str = None):
+    guild_id = interaction.guild.id
+    
+    if user_id is not None:
+        try:
+            user_id_int = int(user_id)
+            current_votes = get_user_vote_count(guild_id, user_id_int)
+            new_votes = current_votes + amount
+            set_user_vote_count(guild_id, user_id_int, new_votes)
+            
+            user_name = user_id
+            try:
+                member = interaction.guild.get_member(user_id_int)
+                if member:
+                    user_name = member.display_name
+            except:
+                pass
+            
+            await interaction.response.send_message(
+                f"Added {amount} vote(s) to {user_name}. New total: {new_votes}",
+                ephemeral=True
+            )
+        except ValueError:
+            await interaction.response.send_message(
+                "Invalid user ID. Please provide a valid numeric ID.",
+                ephemeral=True
+            )
+    else:
+        non_bot_members = [member for member in interaction.guild.members if not member.bot]
+        if not non_bot_members:
+            await interaction.response.send_message(
+                "No users found in the server.",
+                ephemeral=True
+            )
+            return
+        
+        # Give votes to all non-bot users
+        updated_users = 0
+        for member in non_bot_members:
+            current_votes = get_user_vote_count(guild_id, member.id)
+            new_votes = current_votes + amount
+            set_user_vote_count(guild_id, member.id, new_votes)
+            updated_users += 1
+        
+        await interaction.response.send_message(
+            f"Added {amount} vote(s) to {updated_users} users.",
+            ephemeral=True
+        )
+
 @bot.event
 async def on_error(event, *args, **kwargs):
     print(f"Error in {event}: {sys.exc_info()[1]}", flush=True)
@@ -71,7 +123,10 @@ async def on_ready():
 @bot.event
 async def on_message(message: discord.Message):
     await bot.process_commands(message)
-    if message.author.bot or message.guild is None:
+    if message.guild is None:
+        return
+    bot_is_playing = getGuildVar(message.guild.id, "bot_is_playing", False)
+    if message.author.bot and bot_is_playing == False:
         return
     
     guild_id = message.guild.id
@@ -86,6 +141,9 @@ async def on_message(message: discord.Message):
                 match open_qual_mode:
                     case "submissions":
                         content = message.content.strip()
+                        open_qual_round = getGuildVar(guild_id, "open_qual_round", 0)
+                        round_subs: List = getGuildVar(guild_id, f"open_qual_round_{open_qual_round}_submissions", [])
+                        qualified_submissions: List = getGuildVar(guild_id, "qualified_submissions", [])
                         # Check all submission rules
                         if len(content) < 3:
                             await message.delete()
@@ -95,9 +153,21 @@ async def on_message(message: discord.Message):
                             await message.delete()
                             await message.author.send(f"Your submission in {message.channel.mention} must be at most 32 characters long.")
                             return
+                        for sub in round_subs:
+                            if sub["name"].lower() == content.lower():
+                                await message.delete()
+                                await message.author.send(
+                                    f"Your submission '{content}' in {message.channel.mention} is a duplicate for this round."
+                                )
+                                return
+                        for sub in qualified_submissions:
+                            if sub["name"].lower() == content.lower():
+                                await message.delete()
+                                await message.author.send(
+                                    f"Your submission '{content}' in {message.channel.mention} has already qualified in a previous round."
+                                )
+                                return
                         # Passed, lets add to round submissions and process
-                        open_qual_round = getGuildVar(guild_id, "open_qual_round", 0)
-                        round_subs: List = getGuildVar(guild_id, f"open_qual_round_{open_qual_round}_submissions", [])
                         round_subs.append({
                             "name": content,
                             "votes": []
@@ -118,15 +188,23 @@ async def on_message(message: discord.Message):
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.user_id == bot.user.id:
+    if payload.guild_id is None:
         return
+        
+    bot_is_playing = getGuildVar(payload.guild_id, "bot_is_playing", False)
+    print(f"Bot is playing: {bot_is_playing}", flush=True)
+    if payload.user_id == bot.user.id and bot_is_playing == False:
+        return
+        
     channel = bot.get_channel(payload.channel_id)
     if not channel:
         return
+        
     try:
         message = await channel.fetch_message(payload.message_id)
     except discord.NotFound:
         return
+        
     user = await bot.fetch_user(payload.user_id)
     for reaction in message.reactions:
         if str(reaction.emoji) == str(payload.emoji):
@@ -140,10 +218,11 @@ async def on_raw_reaction_remove(payload):
     
     # prevent handling bot reactions
     key = f"{payload.message_id}:{payload.user_id}:{payload.emoji}"
-    print(f"Removing reaction: {key}", flush=True)
     if key in bot_removing_reaction:
-        del bot_removing_reaction[key]
-        return
+        if bot_removing_reaction[key] == True:
+            print(f"Removing reaction {key} - NOT RUNNING HANDLE", flush=True)
+            del bot_removing_reaction[key]
+            return
 
     channel = bot.get_channel(payload.channel_id)
     if not channel:
@@ -155,13 +234,13 @@ async def on_raw_reaction_remove(payload):
     user = await bot.fetch_user(payload.user_id)
     for reaction in message.reactions:
         if str(reaction.emoji) == str(payload.emoji):
-            #await handle_reaction_remove(reaction, user)
+            await handle_reaction_remove(reaction, user)
             break
-            
+            W
 async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
-    if user.bot or reaction.message.guild is None:
+    if reaction.message.guild is None:
         return
-    
+    print(f"Reaction added by {user.name} (ID: {user.id}), is_bot: {user.bot}, emoji: {reaction.emoji}", flush=True)
     guild_id = reaction.message.guild.id
     bracket_channel_name = os.getenv("BRACKET_CHANNEL_NAME")
     if reaction.message.channel.name == bracket_channel_name:
@@ -226,7 +305,6 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                                         )
                                     
                                     user_votes_remaining -= 1
-                                    print(f"User votes left {user_votes_remaining}", flush=True)
                                     set_user_vote_count(guild_id, user.id, user_votes_remaining)
 
                                     # Update message content with new total
@@ -274,7 +352,6 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                 return
             case 2:
                 playoff_mode = getGuildVar(guild_id, "playoff_mode", "view")
-                print(f"Playoff mode: {playoff_mode}")
                 if playoff_mode == "view":
                     return
                 elif playoff_mode == "voting":
@@ -302,7 +379,6 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                             bot_removing_reaction[key] = False
                             await reaction.message.remove_reaction(current_clash.team1emoji, user)
 
-                    print(f"Team 1 votes: {len(team1_votes)}, Team 2 votes: {len(team2_votes)}")
                     setGuildVar(guild_id, "team1_votes", team1_votes)
                     setGuildVar(guild_id, "team2_votes", team2_votes)
                     await process_stage(guild_id)
@@ -336,7 +412,6 @@ async def handle_reaction_remove(reaction: discord.Reaction, user: discord.User)
                         case current_clash.team2emoji:
                             team2_votes = [uid for uid in team2_votes if uid != user.id]
 
-                    print(f"Team 1 votes: {team1_votes}, Team 2 votes: {team2_votes}")
                     setGuildVar(guild_id, "team1_votes", team1_votes)
                     setGuildVar(guild_id, "team2_votes", team2_votes)
                     await process_stage(guild_id)
@@ -394,10 +469,62 @@ async def process_stage(guild_id: int):
                         message = await send_channel_message(guild_id, bracket_channel_name, f"(0) {submission["name"]}")
                         await message.add_reaction("👍")
                         live_submission_messages.append(message)
+
+                    # Bot can vote too !    
+                    bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
+                    if bot_is_playing and getGuildVar(guild_id, "bot_is_playing", False) == False:
+                        setGuildVar(guild_id, "bot_is_playing", True)
+                        bot_votes = int(os.getenv("BOT_VOTES", 1))
+                        # Randomly select messages to vote on until bot_votes is reached
+                        if live_submission_messages and bot_votes > 0:
+                            random_messages = [random.choice(live_submission_messages) for _ in range(bot_votes)]
+                            print(f"Bot is voting on {len(random_messages)} submissions", flush=True)
+                            
+                            # Add reactions to the randomly selected messages
+                            for message in random_messages:
+                                # Now manually process the vote logic (similar to handle_reaction_add)
+                                message_content = message.content
+                                total_message_votes = 0
+                                m = re.match(r'^\(\s*\d+\s*\)\s*(.+)$', message_content)
+                                
+                                if m:
+                                    submission_name = m.group(1)
+                                    for submission in round_submissions:
+                                        if submission['name'] == submission_name:
+                                            # Add bot's vote
+                                            submission['votes'].append(bot.user.id)
+                                            total_message_votes = len(submission['votes'])
+                                            break
+                                    
+                                    # Update the submissions in the guild state
+                                    setGuildVar(
+                                        guild_id,
+                                        f"open_qual_round_{open_qual_round}_submissions",
+                                        round_submissions
+                                    )
+                                
+                                    # Update message content with new vote count
+                                    new_content = re.sub(r'\(\s*\d+\s*\)', f'({total_message_votes})', message_content, count=1)
+                                    await message.edit(content=new_content)
+                                    print(f"Bot voted for: {submission_name}, new vote count: {total_message_votes}", flush=True)
+                        
+                        setGuildVar(guild_id, "bot_is_playing", False)
+
                     setGuildVar(guild_id, f"live_submission_messages", live_submission_messages)
                 else:
-                    print("User submitted!", flush=True)
-                    print(f"Round submission total: {len(round_submissions)}", flush=True)
+                    # event processing lands here
+                    bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
+                    if bot_is_playing and getGuildVar(guild_id, "bot_is_playing", False) == False:
+                        msg_freq = int(os.getenv("BOT_SUBMISSION_FREQUENCY", 3))
+                        amt_msgs_since_last_bot_sub = getGuildVar(guild_id, "amt_msgs_since_last_bot_sub", 0)
+                        amt_msgs_since_last_bot_sub += 1
+                        if amt_msgs_since_last_bot_sub >= msg_freq:
+                            setGuildVar(guild_id, "bot_is_playing", True)
+                            amt_msgs_since_last_bot_sub = 0
+                            print("Sending bot message...", flush=True)
+                            await send_channel_message(guild_id, bracket_channel_name, get_name_submission())
+                            setGuildVar(guild_id, "bot_is_playing", False)
+                        setGuildVar(guild_id, "amt_msgs_since_last_bot_sub", amt_msgs_since_last_bot_sub)
             elif open_qual_mode == "voting":
                 check_count = min(round_qual_spots + 1, len(round_submissions))
                 # Admin must confirm round submission
@@ -468,7 +595,6 @@ async def process_stage(guild_id: int):
 
                 return
             elif playoff_mode == "voting":
-                print("User reacted!", flush=True)
                 # Admin must confirm match submission
                 if getGuildVar(guild_id, "requires_confirmation") == False:
                     setGuildVar(guild_id, "requires_confirmation", True)
@@ -484,7 +610,7 @@ async def process_stage(guild_id: int):
                         current_clash.team2emoji = emoji2
 
                         # send the VS line
-                        vs_text = f"{current_clash.team1} ({emoji1}) VS {current_clash.team2} ({emoji2})"
+                        vs_text = f"**{current_clash.team1}** {emoji1} VS **{current_clash.team2}** {emoji2}"
                         msg = await send_channel_message(guild_id, bracket_channel_name, vs_text)
 
                         # add the reactions for voting
@@ -502,13 +628,13 @@ async def process_stage(guild_id: int):
                             message = ""
                             if len(team1_votes) > len(team2_votes):
                                 bracket.submit_winner(current_clash.team1, len(team1_votes), len(team2_votes))
-                                message = f"{current_clash.team1} is moving on!"
+                                message = f"**{current_clash.team1}** is moving on!"
                             else:
                                 bracket.submit_winner(current_clash.team2, len(team2_votes), len(team1_votes))
-                                message = f"{current_clash.team2} is moving on!"
+                                message = f"**{current_clash.team2}** is moving on!"
 
                             if bracket.get_winner() is not None:
-                                message = f"Well it's official! The winner is {bracket.get_winner()}!"
+                                message = f"Well it's official! The winner is **{bracket.get_winner()}**!"
 
                             setGuildVar(guild_id, "view_message", message)
 
@@ -523,7 +649,9 @@ async def process_stage(guild_id: int):
                             await process_stage(guild_id)
                         else:
                             setGuildVar(guild_id, "confirm_message", "We need a tiebreaker vote...")
-
+                    else:
+                        # After win celebration
+                        return
                     # if bracket.get_winner() is not None:
                     #     # DONE. END EVERYTHING HERE
                     #     print(f"Game ended! The winner is {bracket.get_winner()}")
@@ -702,21 +830,19 @@ def clear_user_votes(guild_id: int) -> None:
     """
     # Set an empty dictionary to reset all user votes
     setGuildVar(guild_id, "user_vote_count", {})
-    
-    print(f"All user votes cleared for guild {guild_id}", flush=True)
 
 def get_emoji_clash_pair() -> list[str]:
     pairs = [
-        ["🐨", "🐻"],  # Koala vs Bear
-        ["🦁", "🐯"],  # Lion vs Tiger
-        ["🐱", "🐶"],  # Cat vs Dog
-        ["🐼", "🐵"],  # Panda vs Monkey
-        ["🦊", "🐺"],  # Fox vs Wolf
-        ["🐮", "🐷"],  # Cow vs Pig
-        ["🐸", "🐤"],  # Frog vs Chick
-        ["🐴", "🦄"],  # Horse vs Unicorn
-        ["🦌", "🦏"],  # Deer vs Rhino
-        ["🐭", "🐰"],  # Mouse vs Rabbit
+        ["🐨", "🐻"],
+        ["🦁", "🐯"],
+        ["🐱", "🐶"],
+        ["🐼", "🐵"],
+        ["🦊", "🐺"],
+        ["🐮", "🐷"],
+        ["🐸", "🐭"],
+        ["🐲", "🦄"],
+        ["🐧", "🦉"],
+        ["🦝", "🐰"],
     ]
     return random.choice(pairs)
 

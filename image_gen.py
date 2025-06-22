@@ -73,6 +73,7 @@ class ImageGen:
     def __init__(self, output_dir: str = "images"):
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
+        os.environ["GDFONTPATH"] = os.path.abspath("fonts")
 
     def create_clash_box(
         self,
@@ -117,51 +118,75 @@ class ImageGen:
         draw.line([(0, mid_y), (width, mid_y)], fill=border_color, width=line_width)
         draw.rectangle([(0, 0), (width - 1, height - 1)], outline=border_color, width=border_width)
 
-        # load font if needed
-        if font is None and font_size:
-            try:
-                font = get_font("roboto", font_size)
-            except Exception:
-                font = get_font("roboto", font_size)
-        elif font is None:
-            font = get_font("roboto", font_size)
-
-        # helper to measure text
-        def measure(text: str) -> tuple[int, int]:
-            bbox = draw.textbbox((0, 0), text, font=font)
+        # Set default font size if not provided
+        if font_size is None:
+            font_size = 24
+        
+        # Helper to measure text
+        def measure(text: str, font_obj) -> tuple[int, int]:
+            bbox = draw.textbbox((0, 0), text, font=font_obj)
             return bbox[2] - bbox[0], bbox[3] - bbox[1]
-
-        # draw centered competitor names
-        tw, th = measure(top_text)
+        
+        # Helper to get appropriate font size for text to fit width
+        def get_fitting_font(text: str, max_width: int, start_size: int, font_name: str = "roboto") -> ImageFont.FreeTypeFont:
+            test_size = start_size
+            test_font = get_font(font_name, test_size)
+            text_width, _ = measure(text, test_font)
+            
+            # Reserve some space for padding and score if needed
+            effective_width = max_width - 20  # 10px padding on each side
+            # if top_box_score is not None or bottom_box_score is not None:
+            #     effective_width -= 50  # Reserve space for score
+            
+            # Reduce font size until text fits
+            while text_width > effective_width and test_size > 8:  # 8 is minimum readable size
+                test_size -= 1
+                test_font = get_font(font_name, test_size)
+                text_width, _ = measure(text, test_font)
+            
+            return test_font
+        
+        # Get appropriate fonts for top and bottom text
+        max_text_width = width - 20  # 10px padding on each side
+        
+        # Calculate the longest text between top and bottom
+        top_font = get_fitting_font(top_text, max_text_width, font_size)
+        bottom_font = get_fitting_font(bottom_text, max_text_width, font_size)
+        
+        # Draw centered competitor names
+        tw, th = measure(top_text, top_font)
         draw.text(
             ((width - tw) / 2, (mid_y - th) / 2),
             top_text,
             fill=top_text_color,
-            font=font,
+            font=top_font,
         )
 
-        bw, bh = measure(bottom_text)
+        bw, bh = measure(bottom_text, bottom_font)
         draw.text(
             ((width - bw) / 2, mid_y + (mid_y - bh) / 2),
             bottom_text,
             fill=bottom_text_color,
-            font=font,
+            font=bottom_font,
         )
 
-        font = get_font("roboto_italic", int(font_size * 0.75))
-        # draw optional scores on right side with padding
+        # Use smaller font for scores
+        score_font_size = int(font_size * 0.75)
+        score_font = get_font("roboto_italic", score_font_size)
+        
+        # Draw optional scores on right side with padding
         padding = 5
         if top_box_score is not None:
-            sw, sh = measure(top_box_score)
+            sw, sh = measure(top_box_score, score_font)
             x = width - sw - padding
             y = (mid_y - sh) / 2
-            draw.text((x, y), top_box_score, fill=top_text_color, font=font)
+            draw.text((x, y), top_box_score, fill=top_text_color, font=score_font)
 
         if bottom_box_score is not None:
-            sw, sh = measure(bottom_box_score)
+            sw, sh = measure(bottom_box_score, score_font)
             x = width - sw - padding
             y = mid_y + (mid_y - sh) / 2
-            draw.text((x, y), bottom_box_score, fill=bottom_text_color, font=font)
+            draw.text((x, y), bottom_box_score, fill=bottom_text_color, font=score_font)
 
         return GeneratedImage(img, self.output_dir)
 
@@ -183,13 +208,15 @@ class ImageGen:
             "rankdir": "LR",
             "nodesep":  "0.5",
             "ranksep":  "1.0",
-            "splines":  "ortho"
+            "splines":  "ortho",
+            "fontname": "Oswald-Medium",
+            "fontsize:": "40"
         }
 
         nodes_by_round: List[List[Node]] = []
 
         with Diagram(
-            "Team Name Bracket",
+            "Team Name Bracket 2.0",
             filename=dot_path,
             show=False,
             direction="LR",
