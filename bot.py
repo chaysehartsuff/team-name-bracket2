@@ -582,17 +582,18 @@ async def process_stage(guild_id: int):
                             setGuildVar(guild_id, "bot_is_playing", False)
                         setGuildVar(guild_id, "amt_msgs_since_last_bot_sub", amt_msgs_since_last_bot_sub)
             elif open_qual_mode == "voting":
-                check_count = min(round_qual_spots + 1, len(round_submissions))
+                start_count = round_qual_spots - 1
+                stop_count = min(round_qual_spots + 1, len(round_submissions))
                 # Admin must confirm round submission
                 if getGuildVar(guild_id, "requires_confirmation") == False:
                     setGuildVar(guild_id, "requires_confirmation", True)
                     # sort by most votes
-                    round_submissions.sort(key=lambda x: x["votes"], reverse=True)
+                    round_submissions.sort(key=lambda x: len(x["votes"]), reverse=True)
                     force_tie_breaker = os.getenv("OPEN_QUAL_FORCE_TIE_BREAKER", "false").lower() == "true"
                     if force_tie_breaker:
-                        top_submissions = round_submissions[:check_count]
+                        top_submissions = round_submissions[start_count:stop_count]
                         for submission in top_submissions:
-                            for sub_submission in round_submissions:
+                            for sub_submission in top_submissions:
                                 if sub_submission["name"] != submission["name"]:
                                     if len(sub_submission["votes"]) == len(submission["votes"]):
                                         setGuildVar(guild_id, "confirm_message", "Break the Tie!")
