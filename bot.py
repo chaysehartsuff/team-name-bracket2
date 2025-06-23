@@ -162,14 +162,17 @@ async def on_message(message: discord.Message):
                         open_qual_round = getGuildVar(guild_id, "open_qual_round", 0)
                         round_subs: List = getGuildVar(guild_id, f"open_qual_round_{open_qual_round}_submissions", [])
                         qualified_submissions: List = getGuildVar(guild_id, "qualified_submissions", [])
+                        min_sub_length = os.getenv("MIN_SUB_LENGTH", 3)
+                        max_sub_length = os.getenv("MAX_SUB_LENGTH", 32)
+
                         # Check all submission rules
-                        if len(content) < 3:
+                        if len(content) < min_sub_length:
                             await message.delete()
-                            await message.author.send(f"Your submission in {message.channel.mention} must be at least 3 characters long.")
+                            await message.author.send(f"Your submission in {message.channel.mention} must be at least {min_sub_length} characters long.")
                             return
-                        elif len(content) > 32:
+                        elif len(content) > max_sub_length:
                             await message.delete()
-                            await message.author.send(f"Your submission in {message.channel.mention} must be at most 32 characters long.")
+                            await message.author.send(f"Your submission in {message.channel.mention} must be at most {max_sub_length} characters long.")
                             return
                         for sub in round_subs:
                             if sub["name"].lower() == content.lower():
