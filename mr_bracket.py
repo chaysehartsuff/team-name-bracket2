@@ -165,3 +165,19 @@ class Bracket:
         img_gen = ImageGen(f"images/guild_{guild_id}")
         return img_gen.create_bracket(rounds, self.rounds).save("bracket/current_standing.png").get_save_path()
 
+
+    def generate_win_meme(name) -> None:
+        # Example usage:
+        image_gen = ImageGen(output_dir="images")
+
+        # Create a new image with text
+        image_gen.create_text_image(800, 600, "lightblue") \
+            .add_text_to_img("Title Text", 100, 50, 700, 150, font_name="roboto", font_size=48, text_color="darkblue") \
+            .add_text_to_img("Subtitle", 150, 200, 650, 250, font_name="roboto_italic", font_size=32, text_color="navy") \
+            .save("text_example.png")
+
+        # Load an existing image and add text
+        image_gen.load_image("background.png") \
+            .add_text_to_img("Player Name", 50, 400, 300, 450, font_size=24, text_color="white") \
+            .add_text_to_img("Score: 100", 500, 400, 750, 450, font_size=24, text_color="yellow") \
+            .save("annotated_image.png")

@@ -30,6 +30,7 @@ def get_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(path, size)
 
 
+
 class GeneratedImage:
     """
     Wrapper for a PIL Image to enable chained save operations using a base directory.
@@ -61,6 +62,82 @@ class GeneratedImage:
         Returns the full path of the saved image.
         """
         return self._full_saved_path
+    
+    def add_text_to_img(
+        self,
+        text: str,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        font_name: str = "roboto",
+        font_size: int = 24,
+        text_color: str = "black",
+        background_color: str = None,
+        align: str = "center"
+    ):
+        """
+        Add text to the image within the specified rectangle.
+        The text will be centered within the rectangle and scaled down if necessary to fit.
+        
+        Args:
+            text: The text to add
+            x1, y1: Top-left corner of the rectangle
+            x2, y2: Bottom-right corner of the rectangle
+            font_name: Name of the font to use (must be available via get_font)
+            font_size: Starting font size (will be reduced if text doesn't fit)
+            text_color: Color of the text
+            background_color: Optional background color for the text area
+            align: Text alignment - "center" (default), "left", or "right"
+            
+        Returns:
+            self for chaining
+        """
+        draw = ImageDraw.Draw(self._image)
+        
+        # Calculate rectangle dimensions
+        rect_width = x2 - x1
+        rect_height = y2 - y1
+        
+        # Draw background if specified
+        if background_color:
+            draw.rectangle([(x1, y1), (x2, y2)], fill=background_color)
+        
+        # Helper to measure text
+        def measure(text_to_measure: str, font_obj) -> tuple[int, int]:
+            bbox = draw.textbbox((0, 0), text_to_measure, font=font_obj)
+            return bbox[2] - bbox[0], bbox[3] - bbox[1]
+        
+        # Find a font size that fits the rectangle
+        current_font_size = font_size
+        current_font = get_font(font_name, current_font_size)
+        text_width, text_height = measure(text, current_font)
+        
+        # Reduce font size until text fits within rectangle
+        while (text_width > rect_width or text_height > rect_height) and current_font_size > 8:
+            current_font_size -= 1
+            current_font = get_font(font_name, current_font_size)
+            text_width, text_height = measure(text, current_font)
+        
+        # Calculate position based on alignment
+        if align == "center":
+            text_x = x1 + (rect_width - text_width) // 2
+            text_y = y1 + (rect_height - text_height) // 2
+        elif align == "left":
+            text_x = x1 + 5  # Small padding from left
+            text_y = y1 + (rect_height - text_height) // 2
+        elif align == "right":
+            text_x = x2 - text_width - 5  # Small padding from right
+            text_y = y1 + (rect_height - text_height) // 2
+        else:
+            # Default to center if invalid alignment
+            text_x = x1 + (rect_width - text_width) // 2
+            text_y = y1 + (rect_height - text_height) // 2
+        
+        # Draw the text
+        draw.text((text_x, text_y), text, fill=text_color, font=current_font)
+        
+        return self
 
 class ImageGen:
     """
@@ -349,8 +426,52 @@ class ImageGen:
         # 3) load & wrap
         img = Image.open(dot_path + ".png")
         w, h = img.size
-        px = int(w * 0.05)   # 5% horizontally
+        px = int(w * 0.05)   # 5% horizontally1
         py = int(h * 0.05)   # 5% vertically
         img = img.crop((px, py, w - px, h - py))
+        return GeneratedImage(img, self.output_dir)
+    
+
+    def create_text_image(
+        self,
+        width: int,
+        height: int,
+        background_color: str = "white"
+    ) -> GeneratedImage:
+        """
+        Create a blank image with the specified dimensions and background color.
+        Returns a GeneratedImage for chaining text additions and saving.
+        
+        Example:
+            image_gen.create_text_image(800, 600).add_text_to_img("Hello", 10, 10, 200, 50).save("text_image.png")
+        """
+        img = Image.new("RGB", (width, height), background_color)
+        return GeneratedImage(img, self.output_dir)
+
+    def load_image(
+        self,
+        image_path: str
+    ) -> GeneratedImage:
+        """
+        Load an existing image from the specified path.
+        Returns a GeneratedImage for chaining text additions and saving.
+        
+        Example:
+            image_gen.load_image("background.png").add_text_to_img("Hello", 10, 10, 200, 50).save("annotated.png")
+        """
+        # Check if path is absolute or relative to output directory
+        if os.path.isabs(image_path):
+            full_path = image_path
+        else:
+            full_path = os.path.join(self.output_dir, image_path)
+        
+        if not os.path.isfile(full_path):
+            raise FileNotFoundError(f"Image file not found: {full_path}")
+        
+        img = Image.open(full_path)
+        # Convert to RGB if needed (in case of RGBA or other formats)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        
         return GeneratedImage(img, self.output_dir)
 
