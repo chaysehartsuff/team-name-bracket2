@@ -257,7 +257,6 @@ async def on_raw_reaction_remove(payload):
     key = f"{payload.message_id}:{payload.user_id}:{payload.emoji}"
     if key in bot_removing_reaction:
         if bot_removing_reaction[key] == True:
-            print(f"Removing reaction {key} - NOT RUNNING HANDLE", flush=True)
             del bot_removing_reaction[key]
             return
 
@@ -275,7 +274,6 @@ async def on_raw_reaction_remove(payload):
             break
             W
 async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
-    print("HERE", flush=True)
     if reaction.message.guild is None:
         return
     guild_id = reaction.message.guild.id
@@ -344,6 +342,7 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                                             )
                                         
                                         user_votes_remaining -= 1
+                                        print(f"{get_user_display_name(guild_id, user.id)} ({user_votes_remaining}) voted for {submission_name}", flush=True)
                                         set_user_vote_count(guild_id, user.id, user_votes_remaining)
 
                                         # Update message content with new total
@@ -369,6 +368,7 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
 
                                         user_votes_remaining += removed_count
                                         total_message_votes = len(submission['votes'])
+                                        print(f"{get_user_display_name(guild_id, user.id)} ({user_votes_remaining}) Reset", flush=True)
                                         set_user_vote_count(guild_id, user.id, user_votes_remaining)
                                         # update live message
                                         for live_message in live_submission_messages:
@@ -418,6 +418,7 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                     if not currently_generating:
                         match reaction.emoji:
                             case current_clash.team1emoji:
+                                print(f"{get_user_display_name(guild_id, user.id)} voted for {current_clash.team1}", flush=True)
                                 team1_votes.append(user.id)
                                 team2_votes = [uid for uid in team2_votes if uid != user.id]
 
@@ -428,6 +429,7 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                                 team2_votes.append(user.id)
                                 team1_votes = [uid for uid in team1_votes if uid!= user.id]
 
+                                print(f"{get_user_display_name(guild_id, user.id)} voted for {current_clash.team2}", flush=True)
                                 key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
                                 bot_removing_reaction[key] = False
                                 await reaction.message.remove_reaction(current_clash.team1emoji, user)
@@ -587,7 +589,7 @@ async def process_stage(guild_id: int):
                                         # Update message content with new vote count
                                         new_content = re.sub(r'\(\s*\d+\s*\)', f'({total_message_votes})', message_content, count=1)
                                         await message.edit(content=new_content)
-                                        print(f"Bot voted for: {submission_name}, new vote count: {total_message_votes}", flush=True)
+                                        print(f"Bot voted for: {submission_name}", flush=True)
                             
                             setGuildVar(guild_id, "bot_is_playing", False)
 
@@ -965,6 +967,23 @@ def clear_user_votes(guild_id: int) -> None:
     """
     # Set an empty dictionary to reset all user votes
     setGuildVar(guild_id, "user_vote_count", {})
+
+def get_user_display_name(guild_id: int, user_id: int) -> str:
+    """
+    Get the display name of a user from their ID.
+    Returns the user ID as a string if the user cannot be found.
+    """
+    try:
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            return str(user_id)  # Fallback to ID if guild not found
+            
+        member = guild.get_member(user_id)
+        if member:
+            return member.display_name
+        return str(user_id)  # Fallback to ID if member not found
+    except:
+        return str(user_id)  # Fallback to ID if any error occurs
 
 def get_emoji_clash_pair() -> list[str]:
     pairs = [
