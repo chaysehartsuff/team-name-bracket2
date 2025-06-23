@@ -700,6 +700,7 @@ async def process_stage(guild_id: int):
                             current_clash = None
                             if bracket.get_winner() is not None:
                                 message = f"Well it's official! The winner is **{bracket.get_winner()}**!"
+                                await allow_reacts_and_messages(bot.get_guild(guild_id), bracket_channel_name)
                                 current_clash = ClashInfo(0, 0, "", "")
 
                             setGuildVar(guild_id, "view_message", message)
@@ -752,6 +753,21 @@ async def close_submissions(guild: discord.Guild, channel_name: str):
     overwrite = channel.overwrites_for(guild.default_role)
     overwrite.send_messages = False
     overwrite.add_reactions = False
+
+    # apply the permission overwrite
+    await channel.set_permissions(guild.default_role, overwrite=overwrite)
+    return None
+
+async def allow_reacts_and_messages(guild: discord.Guild, channel_name: str):
+    # find the channel by name
+    channel = discord.utils.get(guild.text_channels, name=channel_name)
+    if channel is None:
+        return None
+
+    # compute a new overwrite for @everyone
+    overwrite = channel.overwrites_for(guild.default_role)
+    overwrite.send_messages = True
+    overwrite.add_reactions = True
 
     # apply the permission overwrite
     await channel.set_permissions(guild.default_role, overwrite=overwrite)
