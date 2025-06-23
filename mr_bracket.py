@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from bracketool.single_elimination import SingleEliminationGen
 from bracketool.domain import Competitor, Clash as BOClash
@@ -166,18 +167,29 @@ class Bracket:
         return img_gen.create_bracket(rounds, self.rounds).save("bracket/current_standing.png").get_save_path()
 
 
-    def generate_win_meme(name) -> None:
+    def generate_win_meme(self, guild_id: int, name: str) -> str:
         # Example usage:
-        image_gen = ImageGen(output_dir="images")
+        image_gen = ImageGen(f"images")
+        winner = self.get_winner() if self.get_winner() is not None else "New Team Name"
 
-        # Create a new image with text
-        image_gen.create_text_image(800, 600, "lightblue") \
-            .add_text_to_img("Title Text", 100, 50, 700, 150, font_name="roboto", font_size=48, text_color="darkblue") \
-            .add_text_to_img("Subtitle", 150, 200, 650, 250, font_name="roboto_italic", font_size=32, text_color="navy") \
-            .save("text_example.png")
+        match name:
+            case "pass_sword":
+                # text 1 coords
+                t1x1, t1y1 = 210, 155
+                t1x2, t1y2 = t1x1 + 200, t1y1 + 200
 
-        # Load an existing image and add text
-        image_gen.load_image("background.png") \
-            .add_text_to_img("Player Name", 50, 400, 300, 450, font_size=24, text_color="white") \
-            .add_text_to_img("Score: 100", 500, 400, 750, 450, font_size=24, text_color="yellow") \
-            .save("annotated_image.png")
+                #text 2 coords
+                t2x1, t2y1 = 330, 270
+                t2x2, t2y2 = t2x1 + 200, t2y1 + 200
+
+                # text 3 coords
+                t3x1, t3y1 = 120, 30
+                t3x2, t3y2 = t3x1 + 200, t3y1 + 200
+
+                previous_team_name = os.getenv("PREVIOUS_TEAM_NAME")
+                return image_gen.load_image("memes/pass_sword.jpg") \
+                    .add_text_to_img("Team Name", t1x1, t1y1, t1x2, t1y2, font_size=20, text_color="white") \
+                    .add_text_to_img(f"{previous_team_name}", t2x1, t2y1, t2x2, t2y2, font_size=22, text_color="white") \
+                    .add_text_to_img(winner, t3x1, t3y1, t3x2, t3y2, font_size=24, text_color="white") \
+                    .set_base_dir(f"images/guild_{guild_id}") \
+                    .save("meme_output.png").get_save_path()

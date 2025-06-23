@@ -52,6 +52,19 @@ async def clear_stage(interaction: discord.Interaction):
         ephemeral=True
     )
 
+@bot.tree.command(name="test",
+                  description="Test something")
+@app_commands.default_permissions(administrator=True)
+async def clear_stage(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
+    bracket = Bracket()
+    print("RUNNING TEST", flush=True)
+    bracket.generate_win_meme(guild_id, "pass_sword")
+    await interaction.response.send_message(
+        "Test Complete",
+        ephemeral=True
+    )
+
 @bot.tree.command(name="confirm",
                  description="Confirms the pending operation")
 @app_commands.default_permissions(administrator=True)
@@ -687,6 +700,9 @@ async def process_stage(guild_id: int):
                             setGuildVar(guild_id, "confirm_message", "We need a tiebreaker vote...")
                     else:
                         print("POST WINNER CELEBRATION", flush=True)
+                        bracket: Bracket = getGuildVar(guild_id, "bracket")
+                        img_path = bracket.generate_win_meme(guild_id, "pass_sword")
+                        await send_channel_image(guild_id, bracket_channel_name, img_path)
                         return
 
                     return

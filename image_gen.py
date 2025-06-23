@@ -63,6 +63,13 @@ class GeneratedImage:
         """
         return self._full_saved_path
     
+    def set_base_dir(self, new_base_dir: str):
+        """
+        Update the base directory for saving images.
+        """
+        self._base_dir = new_base_dir
+        return self
+    
     def add_text_to_img(
         self,
         text: str,
