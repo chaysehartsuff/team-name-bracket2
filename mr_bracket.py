@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from bracketool.single_elimination import SingleEliminationGen
 from bracketool.domain import Competitor, Clash as BOClash
@@ -165,3 +166,30 @@ class Bracket:
         img_gen = ImageGen(f"images/guild_{guild_id}")
         return img_gen.create_bracket(rounds, self.rounds).save("bracket/current_standing.png").get_save_path()
 
+
+    def generate_win_meme(self, guild_id: int, name: str) -> str:
+        # Example usage:
+        image_gen = ImageGen(f"images")
+        winner = self.get_winner() if self.get_winner() is not None else "New Team Name"
+
+        match name:
+            case "pass_sword":
+                # text 1 coords
+                t1x1, t1y1 = 210, 155
+                t1x2, t1y2 = t1x1 + 200, t1y1 + 200
+
+                #text 2 coords
+                t2x1, t2y1 = 330, 270
+                t2x2, t2y2 = t2x1 + 200, t2y1 + 200
+
+                # text 3 coords
+                t3x1, t3y1 = 120, 30
+                t3x2, t3y2 = t3x1 + 200, t3y1 + 200
+
+                previous_team_name = os.getenv("PREVIOUS_TEAM_NAME")
+                return image_gen.load_image("memes/pass_sword.jpg") \
+                    .add_text_to_img("Team Name", t1x1, t1y1, t1x2, t1y2, font_size=20, text_color="white") \
+                    .add_text_to_img(f"{previous_team_name}", t2x1, t2y1, t2x2, t2y2, font_size=22, text_color="white") \
+                    .add_text_to_img(winner, t3x1, t3y1, t3x2, t3y2, font_size=24, text_color="white") \
+                    .set_base_dir(f"images/guild_{guild_id}") \
+                    .save("meme_output.png").get_save_path()

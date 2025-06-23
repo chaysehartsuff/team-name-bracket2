@@ -52,6 +52,19 @@ async def clear_stage(interaction: discord.Interaction):
         ephemeral=True
     )
 
+@bot.tree.command(name="test",
+                  description="Test something")
+@app_commands.default_permissions(administrator=True)
+async def clear_stage(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
+    bracket = Bracket()
+    print("RUNNING TEST", flush=True)
+    bracket.generate_win_meme(guild_id, "pass_sword")
+    await interaction.response.send_message(
+        "Test Complete",
+        ephemeral=True
+    )
+
 @bot.tree.command(name="confirm",
                  description="Confirms the pending operation")
 @app_commands.default_permissions(administrator=True)
@@ -567,23 +580,24 @@ async def process_stage(guild_id: int):
                             vote_counts[votes] = 1
 
                     # round confirmed
+                    round_qual_submissions = round_submissions[:round_qual_spots]
                     open_qual_round += 1
                     open_qual_mode = "submissions"
                     qualified_submissions = getGuildVar(guild_id, "qualified_submissions", [])
-                    qualified_submissions.extend(round_submissions[:round_qual_spots])
+                    qualified_submissions.extend(round_qual_submissions)
                     setGuildVar(guild_id, "qualified_submissions", qualified_submissions)
                     setGuildVar(guild_id, "open_qual_round", open_qual_round)
                     setGuildVar(guild_id, "open_qual_mode", open_qual_mode)
 
                     message = ""
-                    for idx, submission in enumerate(qualified_submissions):
+                    for idx, submission in enumerate(round_qual_submissions):
                         message += f"**{submission['name']}**"
-                        if idx + 1 < len(qualified_submissions) - 1:
+                        if idx + 1 < len(round_qual_submissions) - 1:
                             message += ", "
-                        elif idx + 1 == len(qualified_submissions) - 1:
+                        elif idx + 1 == len(round_qual_submissions) - 1:
                             message += " and "
 
-                    if len(qualified_submissions) > 0:
+                    if len(round_qual_submissions) > 0:
                         await send_channel_message(guild_id, bracket_channel_name, message + " are moving on!")
 
                     # stage cofirmed
@@ -686,6 +700,9 @@ async def process_stage(guild_id: int):
                             setGuildVar(guild_id, "confirm_message", "We need a tiebreaker vote...")
                     else:
                         print("POST WINNER CELEBRATION", flush=True)
+                        bracket: Bracket = getGuildVar(guild_id, "bracket")
+                        img_path = bracket.generate_win_meme(guild_id, "pass_sword")
+                        await send_channel_image(guild_id, bracket_channel_name, img_path)
                         return
 
                     return
