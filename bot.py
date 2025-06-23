@@ -15,6 +15,7 @@ from guild_state import setGuildVar, getGuildVar, clearGuild
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -56,14 +57,27 @@ async def clear_stage(interaction: discord.Interaction):
                   description="Test something")
 @app_commands.default_permissions(administrator=True)
 async def clear_stage(interaction: discord.Interaction):
-    guild_id = interaction.guild.id
-    bracket = Bracket()
-    print("RUNNING TEST", flush=True)
-    bracket.generate_win_meme(guild_id, "pass_sword")
-    await interaction.response.send_message(
-        "Test Complete",
-        ephemeral=True
+    guild = interaction.guild
+    
+    # Check if members intent is enabled
+    members_intent_enabled = bot.intents.members
+    
+    # Try to get member count from guild object
+    member_count = guild.member_count if hasattr(guild, 'member_count') else "Unknown"
+    
+    # Check how many members we can actually see
+    visible_members = len(guild.members)
+    visible_humans = len([m for m in guild.members if not m.bot])
+    
+    debug_info = (
+        f"Debug Information:\n"
+        f"- Members Intent Enabled: {members_intent_enabled}\n"
+        f"- Guild Member Count: {member_count}\n"
+        f"- Visible Members: {visible_members}\n"
+        f"- Visible Humans: {visible_humans}\n"
     )
+    
+    await interaction.response.send_message(debug_info, ephemeral=True)
 
 @bot.tree.command(name="confirm",
                  description="Confirms the pending operation")
@@ -162,8 +176,8 @@ async def on_message(message: discord.Message):
                         open_qual_round = getGuildVar(guild_id, "open_qual_round", 0)
                         round_subs: List = getGuildVar(guild_id, f"open_qual_round_{open_qual_round}_submissions", [])
                         qualified_submissions: List = getGuildVar(guild_id, "qualified_submissions", [])
-                        min_sub_length = os.getenv("MIN_SUB_LENGTH", 3)
-                        max_sub_length = os.getenv("MAX_SUB_LENGTH", 32)
+                        min_sub_length = int(os.getenv("MIN_SUB_LENGTH", 3))
+                        max_sub_length = int(os.getenv("MAX_SUB_LENGTH", 32))
 
                         # Check all submission rules
                         if len(content) < min_sub_length:
@@ -574,13 +588,12 @@ async def process_stage(guild_id: int):
                     force_tie_breaker = os.getenv("OPEN_QUAL_FORCE_TIE_BREAKER", "false").lower() == "true"
                     if force_tie_breaker:
                         top_submissions = round_submissions[:check_count]
-                        vote_counts = {}
                         for submission in top_submissions:
-                            votes = submission["votes"]
-                            if votes in vote_counts:
-                                setGuildVar(guild_id, "confirm_message", "Tie detected. Try giving the users more votes.")
-                                return
-                            vote_counts[votes] = 1
+                            for sub_submission in round_submissions:
+                                if sub_submission["name"] != submission["name"]:
+                                    if len(sub_submission["votes"]) == len(submission["votes"]):
+                                        setGuildVar(guild_id, "confirm_message", "Break the Tie!")
+                                        return
 
                     # round confirmed
                     round_qual_submissions = round_submissions[:round_qual_spots]
