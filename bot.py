@@ -76,6 +76,9 @@ async def clear_stage(interaction: discord.Interaction):
         f"- Visible Members: {visible_members}\n"
         f"- Visible Humans: {visible_humans}\n"
     )
+
+    # bracket = Bracket()
+    # bracket.generate_win_meme(guild.id, "hotline_bling")
     
     await interaction.response.send_message(debug_info, ephemeral=True)
 
@@ -716,9 +719,16 @@ async def process_stage(guild_id: int):
                         else:
                             setGuildVar(guild_id, "confirm_message", "We need a tiebreaker vote...")
                     else:
-                        print("POST WINNER CELEBRATION", flush=True)
+                        memes_posted = getGuildVar(guild_id, "memes_posted", 0)
                         bracket: Bracket = getGuildVar(guild_id, "bracket")
-                        img_path = bracket.generate_win_meme(guild_id, "pass_sword")
+                        img_path = ""
+                        match memes_posted:
+                            case 0:
+                                img_path = bracket.generate_win_meme(guild_id, "pass_sword")
+                            case 1:
+                                img_path = bracket.generate_win_meme(guild_id, "hotline_bling")
+                        memes_posted += 1
+                        setGuildVar(guild_id, "memes_posted", memes_posted)
                         await send_channel_image(guild_id, bracket_channel_name, img_path)
                         return
 
