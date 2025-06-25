@@ -15,6 +15,7 @@ from guild_state import setGuildVar, getGuildVar, clearGuild
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -56,14 +57,30 @@ async def clear_stage(interaction: discord.Interaction):
                   description="Test something")
 @app_commands.default_permissions(administrator=True)
 async def clear_stage(interaction: discord.Interaction):
-    guild_id = interaction.guild.id
-    bracket = Bracket()
-    print("RUNNING TEST", flush=True)
-    bracket.generate_win_meme(guild_id, "pass_sword")
-    await interaction.response.send_message(
-        "Test Complete",
-        ephemeral=True
+    guild = interaction.guild
+    
+    # Check if members intent is enabled
+    members_intent_enabled = bot.intents.members
+    
+    # Try to get member count from guild object
+    member_count = guild.member_count if hasattr(guild, 'member_count') else "Unknown"
+    
+    # Check how many members we can actually see
+    visible_members = len(guild.members)
+    visible_humans = len([m for m in guild.members if not m.bot])
+    
+    debug_info = (
+        f"Debug Information:\n"
+        f"- Members Intent Enabled: {members_intent_enabled}\n"
+        f"- Guild Member Count: {member_count}\n"
+        f"- Visible Members: {visible_members}\n"
+        f"- Visible Humans: {visible_humans}\n"
     )
+
+    # bracket = Bracket()
+    # bracket.generate_win_meme(guild.id, "hotline_bling")
+    
+    await interaction.response.send_message(debug_info, ephemeral=True)
 
 @bot.tree.command(name="confirm",
                  description="Confirms the pending operation")
@@ -162,14 +179,17 @@ async def on_message(message: discord.Message):
                         open_qual_round = getGuildVar(guild_id, "open_qual_round", 0)
                         round_subs: List = getGuildVar(guild_id, f"open_qual_round_{open_qual_round}_submissions", [])
                         qualified_submissions: List = getGuildVar(guild_id, "qualified_submissions", [])
+                        min_sub_length = int(os.getenv("MIN_SUB_LENGTH", 3))
+                        max_sub_length = int(os.getenv("MAX_SUB_LENGTH", 32))
+
                         # Check all submission rules
-                        if len(content) < 3:
+                        if len(content) < min_sub_length:
                             await message.delete()
-                            await message.author.send(f"Your submission in {message.channel.mention} must be at least 3 characters long.")
+                            await message.author.send(f"Your submission in {message.channel.mention} must be at least {min_sub_length} characters long.")
                             return
-                        elif len(content) > 32:
+                        elif len(content) > max_sub_length:
                             await message.delete()
-                            await message.author.send(f"Your submission in {message.channel.mention} must be at most 32 characters long.")
+                            await message.author.send(f"Your submission in {message.channel.mention} must be at most {max_sub_length} characters long.")
                             return
                         for sub in round_subs:
                             if sub["name"].lower() == content.lower():
@@ -255,6 +275,7 @@ async def on_raw_reaction_remove(payload):
             break
             W
 async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
+    print("HERE", flush=True)
     if reaction.message.guild is None:
         return
     guild_id = reaction.message.guild.id
@@ -293,78 +314,86 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                             await reaction.remove(user)
                             return
                         
-                        match str(reaction.emoji):
-                            case "👍":
-                                user_votes_remaining = get_user_vote_count(guild_id, user.id)
-                                if user_votes_remaining < 1:
-                                    key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
-                                    bot_removing_reaction[key] = True
-                                    await reaction.remove(user)
-                                else:
-                                    message_content = reaction.message.content
-                                    total_message_votes = 0
-                                    m = re.match(r'^\(\s*\d+\s*\)\s*(.+)$', message_content)
-                                    if m:
-                                        submission_name = m.group(1)
-                                        # Find the submission in round_submissions
-                                        for submission in round_submissions:
-                                            if submission['name'] == submission_name:
-                                                submission['votes'].append(user.id)
-                                                total_message_votes = len(submission['votes'])
-                                                break
-
-                                        # Update the submissions in the guild state
-                                        setGuildVar(
-                                            guild_id,
-                                            f"open_qual_round_{open_qual_round}_submissions",
-                                            round_submissions
-                                        )
-                                    
-                                    user_votes_remaining -= 1
-                                    set_user_vote_count(guild_id, user.id, user_votes_remaining)
-
-                                    # Update message content with new total
-                                    old_content = reaction.message.content
-                                    new_content = re.sub(r'\(\s*\d+\s*\)', f'({total_message_votes})', old_content, count=1)
-                                    await reaction.message.edit(content=new_content)
-
-                                    key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
-                                    bot_removing_reaction[key] = True
-                                    await reaction.remove(user)
-
-                                return
-                            case "⭕":
-                                live_submission_messages = getGuildVar(guild_id, "live_submission_messages", [])
-                                user_votes_remaining = get_user_vote_count(guild_id, user.id)
-                                for submission in round_submissions:
-                                    # remove all of this users votes from the submission
-                                    original_count = len(submission['votes'])
-                                    submission['votes'] = [v for v in submission['votes'] if v != user.id]
-                                    removed_count = original_count - len(submission['votes'])
-                                    if removed_count == 0:
-                                        continue
-
-                                    user_votes_remaining += removed_count
-                                    total_message_votes = len(submission['votes'])
-                                    set_user_vote_count(guild_id, user.id, user_votes_remaining)
-                                    # update live message
-                                    for live_message in live_submission_messages:
-                                        m = re.match(r'^\(\s*\d+\s*\)\s*(.+)$', live_message.content)
+                        currently_generating_voting = getGuildVar(guild_id, "currently_generating", False)
+                        if not currently_generating_voting:
+                            match str(reaction.emoji):
+                                case "👍":
+                                    user_votes_remaining = get_user_vote_count(guild_id, user.id)
+                                    if user_votes_remaining < 1:
+                                        key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                                        bot_removing_reaction[key] = True
+                                        await reaction.remove(user)
+                                    else:
+                                        message_content = reaction.message.content
+                                        total_message_votes = 0
+                                        m = re.match(r'^\(\s*\d+\s*\)\s*(.+)$', message_content)
                                         if m:
-                                            raw_name = m.group(1)
-                                            if raw_name == submission['name']:
-                                                new_content = re.sub(r'\(\s*\d+\s*\)', f'({total_message_votes})', live_message.content, count=1)
-                                                await live_message.edit(content=new_content)
-                                                break
+                                            submission_name = m.group(1)
+                                            # Find the submission in round_submissions
+                                            for submission in round_submissions:
+                                                if submission['name'] == submission_name:
+                                                    submission['votes'].append(user.id)
+                                                    total_message_votes = len(submission['votes'])
+                                                    break
+
+                                            # Update the submissions in the guild state
+                                            setGuildVar(
+                                                guild_id,
+                                                f"open_qual_round_{open_qual_round}_submissions",
+                                                round_submissions
+                                            )
+                                        
+                                        user_votes_remaining -= 1
+                                        set_user_vote_count(guild_id, user.id, user_votes_remaining)
+
+                                        # Update message content with new total
+                                        old_content = reaction.message.content
+                                        new_content = re.sub(r'\(\s*\d+\s*\)', f'({total_message_votes})', old_content, count=1)
+                                        await reaction.message.edit(content=new_content)
+
+                                        key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                                        bot_removing_reaction[key] = True
+                                        await reaction.remove(user)
+
+                                    return
+                                case "⭕":
+                                    live_submission_messages = getGuildVar(guild_id, "live_submission_messages", [])
+                                    user_votes_remaining = get_user_vote_count(guild_id, user.id)
+                                    for submission in round_submissions:
+                                        # remove all of this users votes from the submission
+                                        original_count = len(submission['votes'])
+                                        submission['votes'] = [v for v in submission['votes'] if v != user.id]
+                                        removed_count = original_count - len(submission['votes'])
+                                        if removed_count == 0:
+                                            continue
+
+                                        user_votes_remaining += removed_count
+                                        total_message_votes = len(submission['votes'])
+                                        set_user_vote_count(guild_id, user.id, user_votes_remaining)
+                                        # update live message
+                                        for live_message in live_submission_messages:
+                                            m = re.match(r'^\(\s*\d+\s*\)\s*(.+)$', live_message.content)
+                                            if m:
+                                                raw_name = m.group(1)
+                                                if raw_name == submission['name']:
+                                                    new_content = re.sub(r'\(\s*\d+\s*\)', f'({total_message_votes})', live_message.content, count=1)
+                                                    await live_message.edit(content=new_content)
+                                                    break
 
 
-                                key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
-                                bot_removing_reaction[key] = True
-                                await reaction.remove(user)
-                            case _:
-                                key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
-                                bot_removing_reaction[key] = True
-                                await reaction.remove(user)
+                                    key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                                    bot_removing_reaction[key] = True
+                                    await reaction.remove(user)
+                                case _:
+                                    key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                                    bot_removing_reaction[key] = True
+                                    await reaction.remove(user)
+                        else:
+                            key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                            bot_removing_reaction[key] = True
+                            await reaction.remove(user)
+                            return
+                        
 
                         await process_stage(guild_id)
                         return
@@ -377,30 +406,39 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                     current_clash: ClashInfo = getGuildVar(guild_id, "current_clash")
                     # check if current_clash was properly setup
                     if not (hasattr(current_clash, "team1emoji") and hasattr(current_clash, "team2emoji")):
+                        key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                        bot_removing_reaction[key] = True
+                        await reaction.remove(user)
                         return
 
                     team1_votes = getGuildVar(guild_id, "team1_votes", [])
                     team2_votes = getGuildVar(guild_id, "team2_votes", [])
 
-                    match reaction.emoji:
-                        case current_clash.team1emoji:
-                            team1_votes.append(user.id)
-                            team2_votes = [uid for uid in team2_votes if uid != user.id]
+                    currently_generating = getGuildVar(guild_id, "currently_generating", False)
+                    if not currently_generating:
+                        match reaction.emoji:
+                            case current_clash.team1emoji:
+                                team1_votes.append(user.id)
+                                team2_votes = [uid for uid in team2_votes if uid != user.id]
 
-                            key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
-                            bot_removing_reaction[key] = False
-                            await reaction.message.remove_reaction(current_clash.team2emoji, user)
-                        case current_clash.team2emoji:
-                            team2_votes.append(user.id)
-                            team1_votes = [uid for uid in team1_votes if uid!= user.id]
+                                key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                                bot_removing_reaction[key] = False
+                                await reaction.message.remove_reaction(current_clash.team2emoji, user)
+                            case current_clash.team2emoji:
+                                team2_votes.append(user.id)
+                                team1_votes = [uid for uid in team1_votes if uid!= user.id]
 
-                            key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
-                            bot_removing_reaction[key] = False
-                            await reaction.message.remove_reaction(current_clash.team1emoji, user)
+                                key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                                bot_removing_reaction[key] = False
+                                await reaction.message.remove_reaction(current_clash.team1emoji, user)
 
-                    setGuildVar(guild_id, "team1_votes", team1_votes)
-                    setGuildVar(guild_id, "team2_votes", team2_votes)
-                    await process_stage(guild_id)
+                        setGuildVar(guild_id, "team1_votes", team1_votes)
+                        setGuildVar(guild_id, "team2_votes", team2_votes)
+                        await process_stage(guild_id)
+                    else:
+                        key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                        bot_removing_reaction[key] = True
+                        await reaction.remove(user)
 
                 return
             
@@ -471,80 +509,91 @@ async def process_stage(guild_id: int):
                     await send_channel_message(guild_id, bracket_channel_name ,f"Submissions Open! {open_qual_round}/{total_rounds}")
                     await send_channel_message(guild_id, bracket_channel_name, f"We'll accept a total of {max_submissions} names... Go!")
                 elif len(round_submissions) >= max_submissions:
-                    # ensure submissions don't exceed max
+                    # if submissions are above max we must stop further processing
+                    prevent_processing = False
                     while len(round_submissions) > max_submissions:
                         round_submissions.pop()
-                    await close_submissions(bot.get_guild(guild_id), bracket_channel_name)
-                    open_qual_mode = "voting"
-                    await send_channel_message(guild_id, bracket_channel_name ,f"Submissions closed...")
-                    await send_channel_message(guild_id, bracket_channel_name, f"Each person gets {user_votes_per_round} votes")
-                    await send_channel_message(guild_id, bracket_channel_name, f"The top {round_qual_spots} most voted names qualify for playoffs 😎")
-                    instruction_message = await send_channel_message(guild_id, bracket_channel_name ,f"Use 👍 to add votes, Use ⭕ to clear your votes")
-                    await instruction_message.add_reaction("⭕")
-                    clear_user_votes(guild_id)
+                        prevent_processing = True
+                    if prevent_processing:
+                        return
+                    
+                    currently_generating = getGuildVar(guild_id, "currently_generating", False)
+                    if not currently_generating:
+                        currently_generating = True
+                        setGuildVar(guild_id, "currently_generating", currently_generating)
+                        await close_submissions(bot.get_guild(guild_id), bracket_channel_name)
+                        open_qual_mode = "voting"
+                        await send_channel_message(guild_id, bracket_channel_name ,f"Submissions closed...")
+                        await send_channel_message(guild_id, bracket_channel_name, f"Each person gets {user_votes_per_round} votes")
+                        await send_channel_message(guild_id, bracket_channel_name, f"The top {round_qual_spots} most voted names qualify for playoffs 😎")
+                        instruction_message = await send_channel_message(guild_id, bracket_channel_name ,f"Use 👍 to add votes, Use ⭕ to clear your votes")
+                        await instruction_message.add_reaction("⭕")
+                        clear_user_votes(guild_id)
 
-                    live_submission_messages = []
-                    # Prepare all message sending tasks
-                    message_tasks = []
-                    for submission in round_submissions:
-                        message_tasks.append(send_channel_message(guild_id, bracket_channel_name, f"(0) {submission['name']}"))
-                    
-                    # Execute all message sending tasks in parallel
-                    messages = await asyncio.gather(*message_tasks)
-                    live_submission_messages.extend(messages)
-                    
-                    # Now add reactions to all messages
-                    reaction_tasks = []
-                    for message in live_submission_messages:
-                        reaction_tasks.append(message.add_reaction("👍"))
-                    
-                    # Wait for all reactions to be added
-                    await asyncio.gather(*reaction_tasks)
-                    
-                    # Store the messages for later reference
-                    setGuildVar(guild_id, f"live_submission_messages", live_submission_messages)
-
-                    # Bot can vote too !    
-                    bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
-                    if bot_is_playing and getGuildVar(guild_id, "bot_is_playing", False) == False:
-                        setGuildVar(guild_id, "bot_is_playing", True)
-                        bot_votes = int(os.getenv("BOT_VOTES", 1))
-                        # Randomly select messages to vote on until bot_votes is reached
-                        if live_submission_messages and bot_votes > 0:
-                            random_messages = [random.choice(live_submission_messages) for _ in range(bot_votes)]
-                            print(f"Bot is voting on {len(random_messages)} submissions", flush=True)
-                            
-                            # Add reactions to the randomly selected messages
-                            for message in random_messages:
-                                # Now manually process the vote logic (similar to handle_reaction_add)
-                                message_content = message.content
-                                total_message_votes = 0
-                                m = re.match(r'^\(\s*\d+\s*\)\s*(.+)$', message_content)
-                                
-                                if m:
-                                    submission_name = m.group(1)
-                                    for submission in round_submissions:
-                                        if submission['name'] == submission_name:
-                                            # Add bot's vote
-                                            submission['votes'].append(bot.user.id)
-                                            total_message_votes = len(submission['votes'])
-                                            break
-                                    
-                                    # Update the submissions in the guild state
-                                    setGuildVar(
-                                        guild_id,
-                                        f"open_qual_round_{open_qual_round}_submissions",
-                                        round_submissions
-                                    )
-                                
-                                    # Update message content with new vote count
-                                    new_content = re.sub(r'\(\s*\d+\s*\)', f'({total_message_votes})', message_content, count=1)
-                                    await message.edit(content=new_content)
-                                    print(f"Bot voted for: {submission_name}, new vote count: {total_message_votes}", flush=True)
+                        live_submission_messages = []
+                        # Prepare all message sending tasks
+                        message_tasks = []
+                        for submission in round_submissions:
+                            message_tasks.append(send_channel_message(guild_id, bracket_channel_name, f"(0) {submission['name']}"))
                         
-                        setGuildVar(guild_id, "bot_is_playing", False)
+                        # Execute all message sending tasks in parallel
+                        messages = await asyncio.gather(*message_tasks)
+                        live_submission_messages.extend(messages)
+                        
+                        # Now add reactions to all messages
+                        reaction_tasks = []
+                        for message in live_submission_messages:
+                            reaction_tasks.append(message.add_reaction("👍"))
+                        
+                        # Wait for all reactions to be added
+                        await asyncio.gather(*reaction_tasks)
+                        
+                        # Store the messages for later reference
+                        setGuildVar(guild_id, f"live_submission_messages", live_submission_messages)
 
-                    setGuildVar(guild_id, f"live_submission_messages", live_submission_messages)
+                        # Bot can vote too !    
+                        bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
+                        if bot_is_playing and getGuildVar(guild_id, "bot_is_playing", False) == False:
+                            setGuildVar(guild_id, "bot_is_playing", True)
+                            bot_votes = int(os.getenv("BOT_VOTES", 1))
+                            # Randomly select messages to vote on until bot_votes is reached
+                            if live_submission_messages and bot_votes > 0:
+                                random_messages = [random.choice(live_submission_messages) for _ in range(bot_votes)]
+                                print(f"Bot is voting on {len(random_messages)} submissions", flush=True)
+                                
+                                # Add reactions to the randomly selected messages
+                                for message in random_messages:
+                                    # Now manually process the vote logic (similar to handle_reaction_add)
+                                    message_content = message.content
+                                    total_message_votes = 0
+                                    m = re.match(r'^\(\s*\d+\s*\)\s*(.+)$', message_content)
+                                    
+                                    if m:
+                                        submission_name = m.group(1)
+                                        for submission in round_submissions:
+                                            if submission['name'] == submission_name:
+                                                # Add bot's vote
+                                                submission['votes'].append(bot.user.id)
+                                                total_message_votes = len(submission['votes'])
+                                                break
+                                        
+                                        # Update the submissions in the guild state
+                                        setGuildVar(
+                                            guild_id,
+                                            f"open_qual_round_{open_qual_round}_submissions",
+                                            round_submissions
+                                        )
+                                    
+                                        # Update message content with new vote count
+                                        new_content = re.sub(r'\(\s*\d+\s*\)', f'({total_message_votes})', message_content, count=1)
+                                        await message.edit(content=new_content)
+                                        print(f"Bot voted for: {submission_name}, new vote count: {total_message_votes}", flush=True)
+                            
+                            setGuildVar(guild_id, "bot_is_playing", False)
+
+                        setGuildVar(guild_id, f"live_submission_messages", live_submission_messages)
+                        currently_generating = False
+                        setGuildVar(guild_id, "currently_generating", currently_generating)
                 else:
                     # event processing lands here
                     bot_is_playing = os.getenv("BOT_IS_PLAYING", "false").lower() == "true"
@@ -562,22 +611,22 @@ async def process_stage(guild_id: int):
                             setGuildVar(guild_id, "bot_is_playing", False)
                         setGuildVar(guild_id, "amt_msgs_since_last_bot_sub", amt_msgs_since_last_bot_sub)
             elif open_qual_mode == "voting":
-                check_count = min(round_qual_spots + 1, len(round_submissions))
+                start_count = round_qual_spots - 1
+                stop_count = min(round_qual_spots + 1, len(round_submissions))
                 # Admin must confirm round submission
                 if getGuildVar(guild_id, "requires_confirmation") == False:
                     setGuildVar(guild_id, "requires_confirmation", True)
                     # sort by most votes
-                    round_submissions.sort(key=lambda x: x["votes"], reverse=True)
+                    round_submissions.sort(key=lambda x: len(x["votes"]), reverse=True)
                     force_tie_breaker = os.getenv("OPEN_QUAL_FORCE_TIE_BREAKER", "false").lower() == "true"
                     if force_tie_breaker:
-                        top_submissions = round_submissions[:check_count]
-                        vote_counts = {}
+                        top_submissions = round_submissions[start_count:stop_count]
                         for submission in top_submissions:
-                            votes = submission["votes"]
-                            if votes in vote_counts:
-                                setGuildVar(guild_id, "confirm_message", "Tie detected. Try giving the users more votes.")
-                                return
-                            vote_counts[votes] = 1
+                            for sub_submission in top_submissions:
+                                if sub_submission["name"] != submission["name"]:
+                                    if len(sub_submission["votes"]) == len(submission["votes"]):
+                                        setGuildVar(guild_id, "confirm_message", "Break the Tie!")
+                                        return
 
                     # round confirmed
                     round_qual_submissions = round_submissions[:round_qual_spots]
@@ -649,7 +698,10 @@ async def process_stage(guild_id: int):
                     bracket: Bracket = getGuildVar(guild_id, "bracket")
                     current_clash: ClashInfo = getGuildVar(guild_id, "current_clash")
 
+                    currently_generating = getGuildVar(guild_id, "currently_generating", False)
                     if current_clash is None:
+                        currently_generating = True
+                        setGuildVar(guild_id, "currently_generating", currently_generating)
                         current_clash = bracket.get_next_clash()
                         await send_channel_message(guild_id, bracket_channel_name, "Which name is more worthy?")
                         emoji1, emoji2 = get_emoji_clash_pair()
@@ -665,6 +717,8 @@ async def process_stage(guild_id: int):
                         await msg.add_reaction(emoji1)
                         await msg.add_reaction(emoji2)
 
+                        currently_generating = False
+                        setGuildVar(guild_id, "currently_generating", currently_generating)
                         setGuildVar(guild_id, "current_clash", current_clash)
 
                     elif bracket.get_winner() is None:
@@ -684,6 +738,7 @@ async def process_stage(guild_id: int):
                             current_clash = None
                             if bracket.get_winner() is not None:
                                 message = f"Well it's official! The winner is **{bracket.get_winner()}**!"
+                                await allow_reacts_and_messages(bot.get_guild(guild_id), bracket_channel_name)
                                 current_clash = ClashInfo(0, 0, "", "")
 
                             setGuildVar(guild_id, "view_message", message)
@@ -699,9 +754,16 @@ async def process_stage(guild_id: int):
                         else:
                             setGuildVar(guild_id, "confirm_message", "We need a tiebreaker vote...")
                     else:
-                        print("POST WINNER CELEBRATION", flush=True)
+                        memes_posted = getGuildVar(guild_id, "memes_posted", 0)
                         bracket: Bracket = getGuildVar(guild_id, "bracket")
-                        img_path = bracket.generate_win_meme(guild_id, "pass_sword")
+                        img_path = ""
+                        match memes_posted:
+                            case 0:
+                                img_path = bracket.generate_win_meme(guild_id, "pass_sword")
+                            case 1:
+                                img_path = bracket.generate_win_meme(guild_id, "hotline_bling")
+                        memes_posted += 1
+                        setGuildVar(guild_id, "memes_posted", memes_posted)
                         await send_channel_image(guild_id, bracket_channel_name, img_path)
                         return
 
@@ -736,6 +798,21 @@ async def close_submissions(guild: discord.Guild, channel_name: str):
     overwrite = channel.overwrites_for(guild.default_role)
     overwrite.send_messages = False
     overwrite.add_reactions = False
+
+    # apply the permission overwrite
+    await channel.set_permissions(guild.default_role, overwrite=overwrite)
+    return None
+
+async def allow_reacts_and_messages(guild: discord.Guild, channel_name: str):
+    # find the channel by name
+    channel = discord.utils.get(guild.text_channels, name=channel_name)
+    if channel is None:
+        return None
+
+    # compute a new overwrite for @everyone
+    overwrite = channel.overwrites_for(guild.default_role)
+    overwrite.send_messages = True
+    overwrite.add_reactions = True
 
     # apply the permission overwrite
     await channel.set_permissions(guild.default_role, overwrite=overwrite)
