@@ -275,6 +275,7 @@ async def on_raw_reaction_remove(payload):
             break
             W
 async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
+    print("HERE", flush=True)
     if reaction.message.guild is None:
         return
     guild_id = reaction.message.guild.id
@@ -405,30 +406,39 @@ async def handle_reaction_add(reaction: discord.Reaction, user: discord.User):
                     current_clash: ClashInfo = getGuildVar(guild_id, "current_clash")
                     # check if current_clash was properly setup
                     if not (hasattr(current_clash, "team1emoji") and hasattr(current_clash, "team2emoji")):
+                        key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                        bot_removing_reaction[key] = True
+                        await reaction.remove(user)
                         return
 
                     team1_votes = getGuildVar(guild_id, "team1_votes", [])
                     team2_votes = getGuildVar(guild_id, "team2_votes", [])
 
-                    match reaction.emoji:
-                        case current_clash.team1emoji:
-                            team1_votes.append(user.id)
-                            team2_votes = [uid for uid in team2_votes if uid != user.id]
+                    currently_generating = getGuildVar(guild_id, "currently_generating", False)
+                    if not currently_generating:
+                        match reaction.emoji:
+                            case current_clash.team1emoji:
+                                team1_votes.append(user.id)
+                                team2_votes = [uid for uid in team2_votes if uid != user.id]
 
-                            key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
-                            bot_removing_reaction[key] = False
-                            await reaction.message.remove_reaction(current_clash.team2emoji, user)
-                        case current_clash.team2emoji:
-                            team2_votes.append(user.id)
-                            team1_votes = [uid for uid in team1_votes if uid!= user.id]
+                                key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                                bot_removing_reaction[key] = False
+                                await reaction.message.remove_reaction(current_clash.team2emoji, user)
+                            case current_clash.team2emoji:
+                                team2_votes.append(user.id)
+                                team1_votes = [uid for uid in team1_votes if uid!= user.id]
 
-                            key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
-                            bot_removing_reaction[key] = False
-                            await reaction.message.remove_reaction(current_clash.team1emoji, user)
+                                key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                                bot_removing_reaction[key] = False
+                                await reaction.message.remove_reaction(current_clash.team1emoji, user)
 
-                    setGuildVar(guild_id, "team1_votes", team1_votes)
-                    setGuildVar(guild_id, "team2_votes", team2_votes)
-                    await process_stage(guild_id)
+                        setGuildVar(guild_id, "team1_votes", team1_votes)
+                        setGuildVar(guild_id, "team2_votes", team2_votes)
+                        await process_stage(guild_id)
+                    else:
+                        key = f"{reaction.message.id}:{user.id}:{reaction.emoji}"
+                        bot_removing_reaction[key] = True
+                        await reaction.remove(user)
 
                 return
             
@@ -510,6 +520,7 @@ async def process_stage(guild_id: int):
                     currently_generating = getGuildVar(guild_id, "currently_generating", False)
                     if not currently_generating:
                         currently_generating = True
+                        setGuildVar(guild_id, "currently_generating", currently_generating)
                         await close_submissions(bot.get_guild(guild_id), bracket_channel_name)
                         open_qual_mode = "voting"
                         await send_channel_message(guild_id, bracket_channel_name ,f"Submissions closed...")
@@ -687,7 +698,10 @@ async def process_stage(guild_id: int):
                     bracket: Bracket = getGuildVar(guild_id, "bracket")
                     current_clash: ClashInfo = getGuildVar(guild_id, "current_clash")
 
+                    currently_generating = getGuildVar(guild_id, "currently_generating", False)
                     if current_clash is None:
+                        currently_generating = True
+                        setGuildVar(guild_id, "currently_generating", currently_generating)
                         current_clash = bracket.get_next_clash()
                         await send_channel_message(guild_id, bracket_channel_name, "Which name is more worthy?")
                         emoji1, emoji2 = get_emoji_clash_pair()
@@ -703,6 +717,8 @@ async def process_stage(guild_id: int):
                         await msg.add_reaction(emoji1)
                         await msg.add_reaction(emoji2)
 
+                        currently_generating = False
+                        setGuildVar(guild_id, "currently_generating", currently_generating)
                         setGuildVar(guild_id, "current_clash", current_clash)
 
                     elif bracket.get_winner() is None:
