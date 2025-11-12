@@ -1,5 +1,5 @@
 Setup Section:
-1. Run `source ./venv/bin/activate` - This creates a Python environment for the command line.
+1. Run `source .venv/bin/activate` - This creates a Python environment for the command line.
 2. Run `./start.sh` to connect the bot to the Discord server.
 3. Run `./stop.sh` to stop the bot from the Discord server.
 
