@@ -1,3 +1,23 @@
+Description:
+Originally designed to host a submission and voting based competition bracket
+that allows discord server users to contribute in a democractic based process
+that determines a winner submission
+
+Stage 1:
+You may configure premliminary qualification rounds that allows
+many submissions and gives users a chance to pick the top names from each round
+
+Stage 2:
+Once enough submissions qualify (based on your bracket size) a visual bracket will generate
+where a single elimination style voting will take place. Each round walks through the bracket
+until only 1 submission remains
+
+The server owner/admin is responsible for walking through each round by using the /confirm command
+
+- Feel free to request features as desired, this project was built for a very specific vision
+
+
+
 Setup Section:
 1. Run `source .venv/bin/activate` - This creates a Python environment for the command line.
 2. Run `./start.sh` to connect the bot to the Discord server.
