@@ -509,7 +509,7 @@ async def process_stage(guild_id: int):
                     setGuildVar(guild_id, "requires_confirmation", True)
                     await open_submissions(bot.get_guild(guild_id), bracket_channel_name)
                     await send_channel_message(guild_id, bracket_channel_name ,f"Submissions Open! {open_qual_round}/{total_rounds}")
-                    await send_channel_message(guild_id, bracket_channel_name, f"We'll accept a total of {max_submissions} names... Go!")
+                    await send_channel_message(guild_id, bracket_channel_name, f"We'll accept a total of **{max_submissions}** names... Go!")
                 elif len(round_submissions) >= max_submissions:
                     # if submissions are above max we must stop further processing
                     prevent_processing = False
