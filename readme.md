@@ -1,18 +1,14 @@
 # Project Setup and Commands
 
 ## Setup Section
-1. **Install Python and Virtual Environment Package:**
-   * On Ubuntu/Debian:
-     ```bash
-     sudo apt update
-     sudo apt install python3 python3-venv python3-pip
-     ```
-   * On Fedora:
-     ```bash
-     sudo dnf install python3 python3-pip
-     ```
+1. **Run the installer script first:**
+   From the project directory, run:
+   ```bash
+   ./install.sh
+   ```
+   *(This installs required system packages like Python, Graphviz, and Git.)*
 2. **Create the Virtual Environment:**
-   Navigate to your project directory and run:
+   After the installer completes, run:
    ```bash
    python3 -m venv .venv
    ```
