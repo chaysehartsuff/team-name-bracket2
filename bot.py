@@ -12,6 +12,8 @@ from typing import List
 
 from mr_bracket import Bracket, ClashInfo
 from guild_state import setGuildVar, getGuildVar, clearGuild
+from color_name_map import get_all_color_hexes, get_nice_color_content
+from color_image_gen import generate_color_map
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -20,8 +22,6 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 bot_removing_reaction = {}
-
-# ─── add this inside your file ─────────────────────────────────────
 
 @bot.tree.command(name="start",
                   description="Begin team name bracket")
@@ -79,8 +79,13 @@ async def clear_stage(interaction: discord.Interaction):
 
     # bracket = Bracket()
     # bracket.generate_win_meme(guild.id, "hotline_bling")
+    color_map_path = generate_color_map(guild.id)
     
-    await interaction.response.send_message(debug_info, ephemeral=True)
+    await interaction.response.send_message(
+        debug_info,
+        file=discord.File(color_map_path),
+        ephemeral=True,
+    )
 
 @bot.tree.command(name="confirm",
                  description="Confirms the pending operation")
@@ -181,6 +186,21 @@ async def on_message(message: discord.Message):
                         qualified_submissions: List = getGuildVar(guild_id, "qualified_submissions", [])
                         min_sub_length = int(os.getenv("MIN_SUB_LENGTH", 3))
                         max_sub_length = int(os.getenv("MAX_SUB_LENGTH", 32))
+
+                        # check if 'CLUB_COLORS_ONLY' is true
+                        club_colors_only = os.getenv("CLUB_COLORS_ONLY", "false").lower() == "true"
+                        if club_colors_only:
+                            club_color_min = int(os.getenv("CLUB_COLOR_MIN", 1))
+                            club_color_max = int(os.getenv("CLUB_COLOR_MAX", 2))
+                            submitted_colors = get_all_color_hexes(content)
+                            if not (club_color_min <= len(submitted_colors) <= club_color_max):
+                                await message.delete()
+                                if len(submitted_colors) < club_color_min:
+                                    await message.author.send(f"Your submission in {message.channel.mention} must contain at least {club_color_min} valid club colors.")
+                                elif len(submitted_colors) > club_color_max:
+                                    await message.author.send(f"Your submission in {message.channel.mention} must contain at most {club_color_max} valid club colors.")
+                                await message.author.send(f"Remember to use '&' to separate club colors like 'red1&blue2'.")
+                                return
 
                         # Check all submission rules
                         if len(content) < min_sub_length:
@@ -486,6 +506,8 @@ async def process_stage(guild_id: int):
             total_rounds = int(os.getenv("OPEN_QUAL_ROUNDS"))
             total_qual_spots = int(os.getenv("OPEN_QUAL_PASSTHRU_SUBMISSIONS"))
             user_votes_per_round = os.getenv("OPEN_QUAL_MAX_VOTES", 3)
+            club_colors_only = os.getenv("CLUB_COLORS_ONLY", "true").lower() == "true"
+    
 
             # Beging processing
             open_qual_round = getGuildVar(guild_id, "open_qual_round", 0)
@@ -509,7 +531,18 @@ async def process_stage(guild_id: int):
                     setGuildVar(guild_id, "requires_confirmation", True)
                     await open_submissions(bot.get_guild(guild_id), bracket_channel_name)
                     await send_channel_message(guild_id, bracket_channel_name ,f"Submissions Open! {open_qual_round}/{total_rounds}")
-                    await send_channel_message(guild_id, bracket_channel_name, f"We'll accept a total of **{max_submissions}** names... Go!")
+                    if club_colors_only:
+                        color_map_path = generate_color_map(guild_id)
+                        await send_channel_message(
+                            guild_id,
+                            bracket_channel_name,
+                            "This bracket will determine the club's new team colors. We recommend opening Rocket League, choosing the colors you'd like to see, then using the color map below to find their codes.\n\n"
+                            "To submit a primary (1st color) and accent (2nd color) color, combine their codes in one message, like `red1&orange4`. Separate the codes with `&`.",
+                        )
+                        await send_channel_image(guild_id, bracket_channel_name, color_map_path)
+                        await send_channel_message(guild_id, bracket_channel_name, f"We'll accept a total of **{max_submissions}** colors... Go!")
+                    else:
+                        await send_channel_message(guild_id, bracket_channel_name, f"We'll accept a total of **{max_submissions}** names... Go!")
                 elif len(round_submissions) >= max_submissions:
                     # if submissions are above max we must stop further processing
                     prevent_processing = False
@@ -642,7 +675,7 @@ async def process_stage(guild_id: int):
 
                     message = ""
                     for idx, submission in enumerate(round_qual_submissions):
-                        message += f"**{submission['name']}**"
+                        message += f"**{get_nice_color_content(submission['name'])}**"
                         if idx + 1 < len(round_qual_submissions) - 1:
                             message += ", "
                         elif idx + 1 == len(round_qual_submissions) - 1:
@@ -712,7 +745,7 @@ async def process_stage(guild_id: int):
                         current_clash.team2emoji = emoji2
 
                         # send the VS line
-                        vs_text = f"**{current_clash.team1}** {emoji1} VS **{current_clash.team2}** {emoji2}"
+                        vs_text = f"**{get_nice_color_content(current_clash.team1)}** {emoji1} VS **{get_nice_color_content(current_clash.team2)}** {emoji2}"
                         msg = await send_channel_message(guild_id, bracket_channel_name, vs_text)
 
                         # add the reactions for voting
@@ -732,14 +765,14 @@ async def process_stage(guild_id: int):
                             message = ""
                             if len(team1_votes) > len(team2_votes):
                                 bracket.submit_winner(current_clash.team1, len(team1_votes), len(team2_votes))
-                                message = f"**{current_clash.team1}** is moving on!"
+                                message = f"**{get_nice_color_content(current_clash.team1)}** is moving on!"
                             else:
                                 bracket.submit_winner(current_clash.team2, len(team2_votes), len(team1_votes))
-                                message = f"**{current_clash.team2}** is moving on!"
+                                message = f"**{get_nice_color_content(current_clash.team2)}** is moving on!"
 
                             current_clash = None
                             if bracket.get_winner() is not None:
-                                message = f"Well it's official! The winner is **{bracket.get_winner()}**!"
+                                message = f"Well it's official! The winner is **{get_nice_color_content(bracket.get_winner())}**!"
                                 await allow_reacts_and_messages(bot.get_guild(guild_id), bracket_channel_name)
                                 current_clash = ClashInfo(0, 0, "", "")
 

@@ -1,11 +1,13 @@
 from PIL import Image, ImageDraw, ImageFont
 import os
+import re
 import requests
 from typing import Optional, List
 from bracketool.domain import Competitor, Clash
 from diagrams import Diagram, Node, Edge, Cluster
 from diagrams.custom import Custom
 import tempfile
+from color_name_map import get_all_color_hexes, get_nice_color_content
 
 FONT_CACHE_DIR = os.path.expanduser("~/.cache/imagegen/fonts")
 
@@ -29,6 +31,91 @@ def get_font(name: str, size: int) -> ImageFont.FreeTypeFont:
 
     return ImageFont.truetype(path, size)
 
+
+def get_color_labels() -> list[str]:
+    """
+    Collect COLOR_LABEL_<n> env vars in ascending index order (e.g. COLOR_LABEL_1="Primary").
+    Returns an empty list if none are configured.
+    """
+    pattern = re.compile(r"^COLOR_LABEL_(\d+)$")
+    matches = [(int(m.group(1)), value) for key, value in os.environ.items() if (m := pattern.match(key))]
+    matches.sort(key=lambda pair: pair[0])
+    return [value for _, value in matches]
+
+
+def get_contrasting_text_color(hex_color: str) -> str:
+    """
+    Return 'black' or 'white', whichever is more readable over the given hex color.
+    """
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return "black" if luminance > 140 else "white"
+
+
+def draw_color_split(draw: ImageDraw.ImageDraw, x1: int, y1: int, x2: int, y2: int, colors: list[str]) -> None:
+    """Fill the given rectangle with evenly sized vertical stripes, one per color."""
+    stripe_width = (x2 - x1) / len(colors)
+    for i, color in enumerate(colors):
+        stripe_x1 = x1 + round(i * stripe_width)
+        stripe_x2 = x1 + round((i + 1) * stripe_width)
+        draw.rectangle([(stripe_x1, y1), (stripe_x2 - 1, y2)], fill='#' + color)
+
+
+def draw_color_submission(
+    draw: ImageDraw.ImageDraw,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    colors: list[str],
+    text: str,
+    labels: list[str],
+) -> None:
+    draw_color_split(draw, x1, y1, x2, y2, colors)
+    width = x2 - x1
+    height = y2 - y1
+    stripe_width = width / len(colors)
+    label_font = get_font("roboto", 9)
+    label_height = 11 if labels else 0
+    text_area_height = height - label_height
+
+    text_font_size = 16
+    text_font = get_font("roboto", text_font_size)
+    text_bbox = draw.textbbox((0, 0), text, font=text_font, stroke_width=2)
+    text_width = text_bbox[2] - text_bbox[0]
+    while text_width > width - 12 and text_font_size > 9:
+        text_font_size -= 1
+        text_font = get_font("roboto", text_font_size)
+        text_bbox = draw.textbbox((0, 0), text, font=text_font, stroke_width=2)
+        text_width = text_bbox[2] - text_bbox[0]
+
+    text_height = text_bbox[3] - text_bbox[1]
+    text_x = x1 + (width - text_width) / 2
+    text_y = y1 + (text_area_height - text_height) / 2
+    draw.text(
+        (text_x, text_y),
+        text,
+        fill="white",
+        font=text_font,
+        stroke_width=2,
+        stroke_fill="black",
+    )
+
+    for index, label in enumerate(labels[:len(colors)]):
+        stripe_x1 = x1 + round(index * stripe_width)
+        stripe_x2 = x1 + round((index + 1) * stripe_width)
+        label_bbox = draw.textbbox((0, 0), label, font=label_font, stroke_width=1)
+        label_width = label_bbox[2] - label_bbox[0]
+        label_x = stripe_x1 + ((stripe_x2 - stripe_x1) - label_width) / 2
+        label_y = y2 - (label_bbox[3] - label_bbox[1]) - 1
+        draw.text(
+            (label_x, label_y),
+            label,
+            fill="white",
+            font=label_font,
+            stroke_width=1,
+            stroke_fill="black",
+        )
 
 
 class GeneratedImage:
@@ -237,22 +324,38 @@ class ImageGen:
         top_font = get_fitting_font(top_text, max_text_width, font_size)
         bottom_font = get_fitting_font(bottom_text, max_text_width, font_size)
         
-        # Draw centered competitor names
-        tw, th = measure(top_text, top_font)
-        draw.text(
-            ((width - tw) / 2, (mid_y - th) / 2),
-            top_text,
-            fill=top_text_color,
-            font=top_font,
-        )
+        # Draw centered competitor names, or a color split if the text is a color name/list
+        top_colors = get_all_color_hexes(top_text)
+        if top_colors:
+            draw_color_submission(
+                draw, 0, 0, width, mid_y - 1, top_colors,
+                get_nice_color_content(top_text), get_color_labels(),
+            )
+            draw.line([(0, mid_y), (width, mid_y)], fill=border_color, width=max(line_width * 2, 3))
+        else:
+            tw, th = measure(top_text, top_font)
+            draw.text(
+                ((width - tw) / 2, (mid_y - th) / 2),
+                top_text,
+                fill=top_text_color,
+                font=top_font,
+            )
 
-        bw, bh = measure(bottom_text, bottom_font)
-        draw.text(
-            ((width - bw) / 2, mid_y + (mid_y - bh) / 2),
-            bottom_text,
-            fill=bottom_text_color,
-            font=bottom_font,
-        )
+        bottom_colors = get_all_color_hexes(bottom_text)
+        if bottom_colors:
+            draw_color_submission(
+                draw, 0, mid_y, width, height - 1, bottom_colors,
+                get_nice_color_content(bottom_text), get_color_labels(),
+            )
+            draw.line([(0, mid_y), (width, mid_y)], fill=border_color, width=max(line_width * 2, 3))
+        else:
+            bw, bh = measure(bottom_text, bottom_font)
+            draw.text(
+                ((width - bw) / 2, mid_y + (mid_y - bh) / 2),
+                bottom_text,
+                fill=bottom_text_color,
+                font=bottom_font,
+            )
 
         # Use smaller font for scores
         score_font_size = int(font_size * 0.75)
@@ -264,13 +367,19 @@ class ImageGen:
             sw, sh = measure(top_box_score, score_font)
             x = width - sw - padding
             y = (mid_y - sh) / 2
-            draw.text((x, y), top_box_score, fill=top_text_color, font=score_font)
+            draw.text(
+                (x, y), top_box_score, fill="white", font=score_font,
+                stroke_width=2, stroke_fill="black",
+            )
 
         if bottom_box_score is not None:
             sw, sh = measure(bottom_box_score, score_font)
             x = width - sw - padding
             y = mid_y + (mid_y - sh) / 2
-            draw.text((x, y), bottom_box_score, fill=bottom_text_color, font=score_font)
+            draw.text(
+                (x, y), bottom_box_score, fill="white", font=score_font,
+                stroke_width=2, stroke_fill="black",
+            )
 
         return GeneratedImage(img, self.output_dir)
 
@@ -300,7 +409,7 @@ class ImageGen:
         nodes_by_round: List[List[Node]] = []
 
         with Diagram(
-            "Team Name Bracket 2.0",
+            "Team Name Bracket 2.1",
             filename=dot_path,
             show=False,
             direction="LR",
